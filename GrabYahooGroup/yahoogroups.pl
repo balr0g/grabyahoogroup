@@ -1,16 +1,23 @@
 #!/usr/bin/perl -w
 
-# Inspired by Ravi Ramkissoon's fetchyahoo utility. [http://web.mit.edu/ravir/fetchyahoo/index.html]
+# Inspired by Ravi Ramkissoon's fetchyahoo utility.
+# [http://fetchyahoo.twizzler.org/]
 # The basic mechanism for logging on to Yahoo has been taken from his program.
+#
 # Needs atleast one parameter : the group to be downloaded.
 # You can also provide the begin and end message id to download.
-# The program will create a directory in the current directory for every group it downloads.
-# Each message id will have a separate directory and the attachments will be named as provided
-# by the poster. It sanitizes the filename by throwing out all the non word characters
-# excluding "." from the filename.
+
+# If you dont want to keep a file yet skip its download make it a zero byte file
+#
+# The program will create a directory in the current directory for every group
+# it downloads. Each message id will have a separate directory and the
+# attachments will be named as provided by the poster. It sanitizes the
+# filename by throwing out all the non word characters excluding "." from the
+# filename.
 # 
-# By default the tool will run in quite mode assuming the user wants to run it in batchmode.
-# set a environment variable DEBUG to a true value to run in verboose mode.
+# By default the tool will run in quite mode assuming the user wants to run it
+# in batchmode. Set a environment variable DEBUG to a true value to run in
+# verboose mode.
 #
 # Adapted by : Mithun Bhattacharya [mithun at users sourceforge net] 9/9/2002
 
@@ -23,9 +30,8 @@ use LWP::Simple ();
 use HTML::Entities;
 sub GetRedirectUrl($);
 
-# If you dont want to keep a file yet skip its download make it a zero byte file.
-
-my $DEBUG = 1 if $ENV{'DEBUG'}; # By default works in quite mode other than die's.
+# By default works in quite mode other than die's.
+my $DEBUG = 1 if $ENV{'DEBUG'};
 
 my $SAVEALL = 0; # Force download every file even if the file exists locally.
 
