@@ -14,7 +14,7 @@ WARNING: Perl version > 5.6.0 are unicode aware and can cause problems handling
 binary data. Binary data includes all zip files and image files downloaded using
 this script. Please read perldoc perlunicode for more details.
 In RedHat 8.0 and RedHat 9.0 I have circumvented the problem by setting the 
-environment variable LANG to C. Setting this system wide might not be acceptable
+environment variable LANG to en_US. Setting this system wide might not be acceptable
 therefore I would recommend running the script as 
 
-env LANG=en_US ./yahoo2mailbox.pl <group name>
+env LANG=en_US yahoo2maildir.pl <group name>

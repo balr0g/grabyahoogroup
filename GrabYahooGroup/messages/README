@@ -23,8 +23,8 @@ verboose mode.
 
 ------------------------
 
-To run : ./yahoo2mailbox.pl <group name> [<begin message id> [<end message id>]]
+To run : yahoo2maildir.pl <group name> [<begin message id> [<end message id>]]
 
-Verbose mode : env DEBUG=1 ./yahoo2mailbox.pl <group name> [<begin message id> [<end message id>]]
+Quite mode : env VERBOSE=0 yahoo2maildir.pl <group name> [<begin message id> [<end message id>]]
 
-Verbose mode with unicode support turned off : env DEBUG=1 LANG=C ./yahoo2mailbox.pl <group name> [<begin message id> [<end message id>]]
+Verbose mode with unicode support turned off : env VERBOSE=0 LANG=en_US yahoo2maildir.pl <group name> [<begin message id> [<end message id>]]
