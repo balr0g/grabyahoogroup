@@ -70,7 +70,7 @@ die "$! : $group\n" unless chdir $group;
 
 my $ua = LWP::UserAgent->new;
 $ua->proxy('http', $HTTP_PROXY_URL) if $HTTP_PROXY_URL;
-$ua->agent('GrabYahooGroup/0.04');
+$ua->agent('GrabYahooGroup/1.5');
 my $cookie_jar = HTTP::Cookies->new( 'file' => 'yahoogroups.cookies' );
 $ua->cookie_jar($cookie_jar);
 my $request;
