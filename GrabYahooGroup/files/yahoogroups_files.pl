@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.3 2004-08-16 05:52:43 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.4 2004-08-31 12:39:57 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -273,6 +273,7 @@ sub download_folder {
 			}
 		
 			terminate("$! : $file_name") unless open(IFD, "> $group$sub_folder/$file_name");
+			binmode(IFD);
 			print IFD $content;
 			close IFD;
 			print ".. done\n" if $VERBOSE;
