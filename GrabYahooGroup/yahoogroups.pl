@@ -28,6 +28,7 @@ use HTTP::Cookies ();
 use LWP::UserAgent ();
 use LWP::Simple ();
 use HTML::Entities;
+use Cwd qw(abs_path);
 sub GetRedirectUrl($);
 
 # By default works in quite mode other than die's.
@@ -66,20 +67,22 @@ unless (-d $group or mkdir $group) {
 
 die "$! : $group\n" unless chdir $group;
 
+my $Cookie_file = abs_path('yahoogroups.cookies');
+
 # Logon to Yahoo
 
 my $ua = LWP::UserAgent->new;
 $ua->proxy('http', $HTTP_PROXY_URL) if $HTTP_PROXY_URL;
-$ua->agent('GrabYahooGroup/1.5');
-my $cookie_jar = HTTP::Cookies->new( 'file' => 'yahoogroups.cookies' );
+$ua->agent('GrabYahooGroup/0.04');
+my $cookie_jar = HTTP::Cookies->new( 'file' => $Cookie_file );
 $ua->cookie_jar($cookie_jar);
 my $request;
 my $response;
 my $url;
 my $content;
-if ($COOKIE_LOAD and -f 'yahoogroups.cookies') {
+if ($COOKIE_LOAD and -f $Cookie_file) {
 	$cookie_jar->load();
-	$request = GET "http://groups.yahoo.com/group/$group/messages";
+	$request = GET "http://groups.yahoo.com/group/$group/messages/1";
 	$response = $ua->simple_request($request);
 	
 	while ( $response->is_redirect ) {
@@ -90,7 +93,7 @@ if ($COOKIE_LOAD and -f 'yahoogroups.cookies') {
 	}
 	
 	print "Already logged in continuing.\n" if $DEBUG; 
-	
+
 } else {
 	unless ($username) {
 		print "Enter username : ";
@@ -140,103 +143,104 @@ if ($COOKIE_LOAD and -f 'yahoogroups.cookies') {
 	die "Yahoo user $username does not exist\n" if ( $content =~ /ID does not exist/ );
 	
 	print "Successfully logged in as $username.\n" if $DEBUG; 
-	
-	if ($GETADULT) {
-		$request = POST 'http://groups.yahoo.com/adultconf',
-			[
-			 'ref' => '',
-			 'dest'  => "/group/$group/messages",
-			 'accept' => 'I Accept'
-			];
-		
-		$request->content_type('application/x-www-form-urlencoded');
-		$request->header('Accept' => '*/*');
-		$request->header('Allowed' => 'GET HEAD PUT');
-		$response = $ua->simple_request($request);
-		
-		while ( $response->is_redirect ) {
-			$cookie_jar->extract_cookies($response);
-			$url = GetRedirectUrl($response);
-			$request = GET $url;
-			$response = $ua->simple_request($request);
-		}
-		
-		print "$username confirmed as a adult\n" if $DEBUG;
-	}
 }
 
-unless ($begin_msgid) {
-	$content = $response->content;
-	$content = HTML::Entities::decode($content);
-	($end_msgid) = $content =~ /\d*-\d* of (\d*) /;
-	die "Couldn't get message count" unless $end_msgid;
-	$begin_msgid = 1;
-}
+if ($GETADULT) {
+	$request = POST 'http://groups.yahoo.com/adultconf',
+		[
+		 'ref' => '',
+		 'dest'  => "/group/$group/messages/1",
+		 'accept' => 'I Accept'
+		];
 
-foreach my $messageid (reverse $begin_msgid..$end_msgid) {
-	unless (-d $messageid or mkdir $messageid) {
-		print STDERR "$! : $messageid\n" if $DEBUG;
-	}
-	next if $REFRESH and -d ($messageid - 1);
-	print "$messageid: " if $DEBUG;
-	die "$! : $messageid\n" unless chdir $messageid;
-
-	$url = "http://groups.yahoo.com/group/$group/message/$messageid";
-	$request = GET $url;
+	$request->content_type('application/x-www-form-urlencoded');
+	$request->header('Accept' => '*/*');
+	$request->header('Allowed' => 'GET HEAD PUT');
 	$response = $ua->simple_request($request);
+
 	while ( $response->is_redirect ) {
 		$cookie_jar->extract_cookies($response);
 		$url = GetRedirectUrl($response);
 		$request = GET $url;
 		$response = $ua->simple_request($request);
 	}
-	$content = $response->content;
-	$content = HTML::Entities::decode($content);
-	# If the page comes up with just a advertizement without the message.
-	if ($content =~ /Continue to message/s) {
+
+	print "Confirmed as a adult\n" if $DEBUG;
+}
+
+eval {
+	unless ($begin_msgid) {
+		$content = $response->content;
+		$content = HTML::Entities::decode($content);
+		($begin_msgid, $end_msgid) = $content =~ /(\d+)-\d+ of (\d+) /;
+		die "Couldn't get message count" unless $end_msgid;
+	}
+
+	foreach my $messageid ($begin_msgid..$end_msgid) {
+		unless (-d $messageid or mkdir $messageid) {
+			print STDERR "$! : $messageid\n" if $DEBUG;
+		}
+		next if $REFRESH and -d ($messageid + 1);
+		print "$messageid: " if $DEBUG;
+		die "$! : $messageid\n" unless chdir $messageid;
+	
 		$url = "http://groups.yahoo.com/group/$group/message/$messageid";
 		$request = GET $url;
 		$response = $ua->simple_request($request);
+		while ( $response->is_redirect ) {
+			$cookie_jar->extract_cookies($response);
+			$url = GetRedirectUrl($response);
+			$request = GET $url;
+			$response = $ua->simple_request($request);
+		}
 		$content = $response->content;
 		$content = HTML::Entities::decode($content);
-	}
-
-	my @attachments = $content =~ /<center><B>Attachment<\/center>.*?<B>(.*?href=".*?)"/sg;
-	foreach my $attach (@attachments) {
-		my ($filename, $imageurl) = $attach =~ /(.*?)<\/B>.*?href="(.*)/s;
-		$filename =~ s/([^\w_\-.]*)//g;
-		if ($DEBUG and -f $filename) {
-			print "-";
-			next unless $SAVEALL; # Skip if file was downloaded previously
+		# If the page comes up with just a advertizement without the message.
+		if ($content =~ /Continue to message/s) {
+			$url = "http://groups.yahoo.com/group/$group/message/$messageid";
+			$request = GET $url;
+			$response = $ua->simple_request($request);
+			$content = $response->content;
+			$content = HTML::Entities::decode($content);
 		}
-		print "." if $DEBUG;
-		$request = GET $imageurl;
-		$response = $ua->simple_request($request);
-		my $content = $response->content;
-		die "Download limit exceeded\n" if ($content =~ /Document Unavailable/);
-		die "$! : $filename\n" unless open(IFD, "> $filename");
-		print IFD $content;
-		close IFD;
+	
+		my @attachments = $content =~ /<center><B>Attachment<\/center>.*?<B>(.*?href=".*?)"/sg;
+		foreach my $attach (@attachments) {
+			my ($filename, $imageurl) = $attach =~ /(.*?)<\/B>.*?href="(.*)/s;
+			$filename =~ s/([^\w_\-.]*)//g;
+			if ($DEBUG and -f $filename) {
+				print "-";
+				next unless $SAVEALL; # Skip if file was downloaded previously
+			}
+			print "." if $DEBUG;
+			$request = GET $imageurl;
+			$response = $ua->simple_request($request);
+			my $content = $response->content;
+			die "Download limit exceeded\n" if ($content =~ /Document Unavailable/);
+			die "$! : $filename\n" unless open(IFD, "> $filename");
+			print IFD $content;
+			close IFD;
+		}
+		print "\n" if $DEBUG;
+		die "$!\n" unless chdir '../';
 	}
-	print "\n" if $DEBUG;
-	die "$!\n" unless chdir '../';
-}
-
-$cookie_jar->save if $COOKIE_SAVE;
-
-sub DESTROY {
+	
 	$cookie_jar->save if $COOKIE_SAVE;
+};
+
+if ($@) {
+	$cookie_jar->save if $COOKIE_SAVE;
+	die $@;
 }
 
 sub GetRedirectUrl($) {
-    my $response = $_[0];
-    my $url = $response->header('Location') || return undef;
-    
-    # the Location URL is sometimes non-absolute which is not allowed, fix it
-    local $URI::ABS_ALLOW_RELATIVE_SCHEME = 1;
-    my $base = $response->base;
-    $url = $HTTP::URI_CLASS->new($url, $base)->abs($base);
-    
-    return $url;
-}
+	my ($response) = @_;
+	my $url = $response->header('Location') || return undef;
 
+	# the Location URL is sometimes non-absolute which is not allowed, fix it
+	local $URI::ABS_ALLOW_RELATIVE_SCHEME = 1;
+	my $base = $response->base;
+	$url = $HTTP::URI_CLASS->new($url, $base)->abs($base);
+
+	return $url;
+}
