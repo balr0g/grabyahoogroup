@@ -1,0 +1,26 @@
+Inspired by Ravi Ramkissoon's fetchyahoo utility.
+[http://fetchyahoo.sourceforge.net/]
+
+The basic mechanism for logging on to Yahoo has been taken from fetchyahoo.
+
+Needs atleast one parameter : the group to be downloaded.
+
+If you don't want to keep a file yet skip its download make it a zero byte file
+
+The script will create a directory in the current directory for every group
+it downloads. Inside this folder the complete hierarchy will be replicated as
+present on Yahoo.
+
+By default the tool will run in verbose mode assuming the user wants to run it
+in batch mode. Set a environment variable DEBUG to a true value to run in
+verbose mode.
+
+# Mandatory : group to download
+
+------------------------
+
+To run : ./yahoogroups_files.pl <group name>
+
+Quite mode : env VERBOSE=0 ./yahoogroups_files.pl <group name>
+
+Quite mode with unicode support turned off : env VERBOSE=0 LANG=en_US ./yahoogroups_files.pl <group name>

@@ -1,5 +1,5 @@
 Inspired by Ravi Ramkissoon's fetchyahoo utility.
-[http://fetchyahoo.twizzler.org/]
+[http://fetchyahoo.sourceforge.net/]
 and by  Vadim Zeitlin's yahoo2mbox utility.
 [http://www.lpthe.jussieu.fr/~zeitlin/yahoo2mbox.html]
 
@@ -14,9 +14,9 @@ If you dont want to keep a file yet skip its download make it a zero byte file
 The program will create a directory in the current directory for every group
 it downloads. Each message id will be a separate file in that folder.
 
-By default the tool will run in quite mode assuming the user wants to run it
-in batchmode. Set a environment variable DEBUG to a true value to run in
-verboose mode.
+By default the tool will run in verbose mode assuming the user wants to run it
+in batch mode. Set a environment variable VERBOSE to a true value to run in
+verbose mode.
 
 # Mandatory : group to download
 # Optional : begining message id and ending message id.
@@ -27,4 +27,4 @@ To run : yahoo2maildir.pl <group name> [<begin message id> [<end message id>]]
 
 Quite mode : env VERBOSE=0 yahoo2maildir.pl <group name> [<begin message id> [<end message id>]]
 
-Verbose mode with unicode support turned off : env VERBOSE=0 LANG=en_US yahoo2maildir.pl <group name> [<begin message id> [<end message id>]]
+Quite mode with unicode support turned off : env VERBOSE=0 LANG=en_US yahoo2maildir.pl <group name> [<begin message id> [<end message id>]]
