@@ -8,7 +8,6 @@ use HTTP::Request::Common qw(GET POST);
 use HTTP::Cookies ();
 use LWP::UserAgent ();
 use LWP::Simple ();
-use File::Copy;
 sub GetRedirectUrl($);
 
 # By default works in verbose mode unless VERBOSE=0 via environment variable for cron job.
@@ -229,11 +228,6 @@ sub download_folder {
 			next if -f "$group$sub_folder/$file_name";
 			if ($file_url =~ /\/$/) {
 				download_folder("$sub_folder/$file_name");
-				next;
-			}
-			if (-f "$group/$file_name") {
-				print "\tMoving $group/$file_name to $group$sub_folder/\n" if $VERBOSE;
-				move("$group/$file_name", "$group$sub_folder/$file_name");
 				next;
 			}
 			print "\t$sub_folder/$file_name .." if $VERBOSE;
