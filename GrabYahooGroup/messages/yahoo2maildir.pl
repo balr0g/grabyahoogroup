@@ -278,6 +278,11 @@ for my $line ( split /\n/, $unmangle_data ) {
 	$unmangling_table{$num} = [ @fields ];
 }
 
+my $attachment_nobody = q{<br>
+<i>[Attachment content not displayed.]</i><br><br>
+</td></tr>
+</table>};
+
 # By default works in verbose mode unless VERBOSE=0 via environment variable for cron job.
 my $VERBOSE = 1;
 $VERBOSE = $ENV{'VERBOSE'} if $ENV{'VERBOSE'};
@@ -410,7 +415,7 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 	print "Successfully logged in as $username.\n" if $VERBOSE; 
 }
 
-if ($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/i) {
+if (($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) or ($content =~ /you have reached an age-restricted area of Yahoo! Groups/)) {
 	if ($GETADULT) {
 		$request = POST 'http://groups.yahoo.com/adultconf',
 			[
@@ -507,12 +512,30 @@ eval {
 			next;
 		}
 
-		my ($email_body) = $content =~ /<x-html>.+?<table.+?<tt>(.+?)<\/tt>/s;
-		$email_body =~ s/<br>//sgi;
+		my ($email_content) = $content =~ /<!-- start content include -->\s(.+?)\s<!-- end content include -->/s;
+
+		my ($email_header, $rest) = $email_content =~ /<table.+?<tt>(.+?)<\/tt>(.+)/s;
+		if ($rest eq $attachment_nobody) {
+			print "... body contains attachment with no body\n";
+			open (MFD, "> $group/$messageid");
+			close MFD;
+			next;
+		}
+		my ($email_body) = $rest =~ /<tt>(.+?)<\/td>/s;
+
+		$email_header =~ s/<br>//gi;
+		$email_header =~ s/<a.+?protectID=(.+?)".+?<\/a>/&extract_email($1)/esg;
+		$email_header =~ s/<a href=".+?>(.+?)<\/a>/$1/g; # Yahoo hyperlinks every URL which is not already a hyperlink.
+		$email_header =~ s/<.+?>//g;
+		$email_header = HTML::Entities::decode($email_header);
+		$email_body =~ s/<br>//gi;
 		$email_body =~ s/<a.+?protectID=(.+?)".+?<\/a>/&extract_email($1)/esg;
 		$email_body =~ s/<a href=".+?>(.+?)<\/a>/$1/g; # Yahoo hyperlinks every URL which is not already a hyperlink.
+		$email_body =~ s/<.+?>//g;
 		$email_body = HTML::Entities::decode($email_body);
 		open (MFD, "> $group/$messageid");
+		print MFD $email_header;
+		print MFD "\n";
 		print MFD $email_body;
 		close MFD;
 		print "\n" if $VERBOSE;
