@@ -1,5 +1,7 @@
 #!/usr/bin/perl -wT
 
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.9 2005-03-19 10:44:01 mithun Exp $
+
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
 use strict;
@@ -27,6 +29,9 @@ my $GETADULT = 1; # Allow adult groups to be downloaded.
 my $COOKIE_SAVE = 1; # Save cookies before finishing - wont if aborted.
 my $COOKIE_LOAD = 1; # Load cookies if saved from previous session.
 
+my $HUMAN_WAIT = 40; # Amount of time it would take a human being to read a page
+my $HUMAN_REFLEX = 20; # Amount of time it would take a human being to react to a page
+
 $| = 1 if ($VERBOSE); # Want to see the messages immediately if I am in verbose mode
 
 my $username = ''; # Better here than the commandline.
@@ -35,6 +40,7 @@ $password = '' unless $password; # Better here than the commandline.
 my $HTTP_PROXY_URL = ''; # Proxy server if any http://hostname:port/
 my $TIMEOUT = 10; # Connection timeout changed from default 3 min for slow connection/server
 my $USER_AGENT = 'GrabYahoo/1.00'; # Changing this value is probably unethical at the least and possible illegal at the worst
+my $cycle = 1; # Every block cycle
 
 unless ($HTTP_PROXY_URL) {
 	if ($ENV{'http_proxy'}) {
@@ -42,9 +48,11 @@ unless ($HTTP_PROXY_URL) {
 	}
 }
 
+srand(time() . $$);
+
 my ($user_group, $bmsg, $emsg) = @ARGV;
 
-die "Please specify a group to process\n" unless $user_group;
+terminate("Please specify a group to process") unless $user_group;
 
 my $begin_msgid;
 my $end_msgid;
@@ -53,7 +61,7 @@ if (defined $bmsg) {
 	if ($bmsg =~ /^(\d+)$/) {
 		$begin_msgid = $1;
 	} else {
-		die "Begin message id should be integer\n";
+		terminate("Begin message id should be integer");
 	}
 }
 
@@ -61,11 +69,11 @@ if (defined $emsg) {
 	if ($emsg =~ /^(\d+)$/) {
 		$end_msgid = $1;
 	} else {
-		die "End message id should be integer\n";
+		terminate("End message id should be integer");
 	}
 }
 
-die "End message id : $end_msgid should be greater than begin message id : $begin_msgid\n" if ($end_msgid and $end_msgid < $begin_msgid);
+terminate("End message id : $end_msgid should be greater than begin message id : $begin_msgid") if ($end_msgid and $end_msgid < $begin_msgid);
 
 my ($group) = $user_group =~ /^([\w_\-]+)$/;
 
@@ -89,8 +97,6 @@ my $content;
 if ($COOKIE_LOAD and -f $Cookie_file) {
 	$cookie_jar->load();
 }
-
-$request = GET "http://groups.yahoo.com/group/$group/messages/1";
 
 $request = GET "http://groups.yahoo.com/group/$group/messages/1";
 $response = $ua->simple_request($request);
@@ -175,6 +181,7 @@ if ($content =~ /Sign in with your ID and password to continue/ or $content =~ /
 	$request->content_type('application/x-www-form-urlencoded');
 	$request->header('Accept' => '*/*');
 	$request->header('Allowed' => 'GET HEAD PUT');
+	sleep($HUMAN_WAIT + int(rand($HUMAN_REFLEX)));
 	$response = $ua->simple_request($request);
 	if ($response->is_error) {
 		print STDERR "[http://login.yahoo.com/config/login] " . $response->as_string . "\n" if $VERBOSE;
@@ -194,11 +201,11 @@ if ($content =~ /Sign in with your ID and password to continue/ or $content =~ /
 
 	$content = $response->content;
 
-	die "Couldn't log in $username\n" if ( !$response->is_success );
+	terminate("Couldn't log in $username") if ( !$response->is_success );
 
-	die "Wrong password entered for $username\n" if ( $content =~ /Invalid Password/ );
+	terminate("Wrong password entered for $username") if ( $content =~ /Invalid Password/ );
 
-	die "Yahoo user $username does not exist\n" if ( $content =~ /ID does not exist/ );
+	terminate("Yahoo user $username does not exist") if ( $content =~ /ID does not exist/ );
 
 	print "Successfully logged in as $username.\n" if $VERBOSE; 
 }
@@ -216,6 +223,7 @@ if (($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) or ($
 		$request->content_type('application/x-www-form-urlencoded');
 		$request->header('Accept' => '*/*');
 		$request->header('Allowed' => 'GET HEAD PUT');
+		sleep($HUMAN_WAIT + int(rand($HUMAN_REFLEX)));
 		$response = $ua->simple_request($request);
 		if ($response->is_error) {
 			print STDERR "[http://groups.yahoo.com/adultconf] " . $response->as_string . "\n" if $VERBOSE;
@@ -243,9 +251,7 @@ if (($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) or ($
 	}
 }
 
-my $upper_group = uc($group);
-
-if ($content =~ /You are not a member of the group <b>$upper_group/) {
+if ($content =~ /You are not a member of the group <b>$group/) {
 	print STDERR "Not a member of the group $group\n";
 	exit;
 }
@@ -256,11 +262,16 @@ eval {
 	unless ($end_msgid) {
 		$content = $response->content;
 		($b, $e) = $content =~ /(\d+)-\d+ of (\d+) /;
-		die "Couldn't get message count" unless $e;
+		terminate("Couldn't get message count") unless $e;
 	}
 	$begin_msgid = $b unless $begin_msgid;
 	$end_msgid = $e unless $end_msgid;
-	die "End message id :$end_msgid should be greater than begin message id : $begin_msgid\n" if ($end_msgid < $begin_msgid);
+	terminate("End message id :$end_msgid should be greater than begin message id : $begin_msgid") if ($end_msgid < $begin_msgid);
+
+	if ($end_msgid > $e) {
+		print STDERR "End message id is greater than what is reported by Yahoo - adjusting value to $e\n");
+		$end_msgid = $e;
+	}
 
 	print "Processing messages between $begin_msgid and $end_msgid\n" if $VERBOSE;
 
@@ -270,6 +281,7 @@ eval {
 
 		$url = "http://groups.yahoo.com/group/$group/message/$messageid?source=1\&unwrap=1";
 		$request = GET $url;
+		sleep($HUMAN_WAIT + int(rand($HUMAN_REFLEX)));
 		$response = $ua->simple_request($request);
 		if ($response->is_error) {
 			print STDERR "[http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] " . $response->as_string . "\n" if $VERBOSE;
@@ -288,12 +300,32 @@ eval {
 		}
 		$content = $response->content;
 
-		# Unlikely but Yahoo's services are not the epitome of perfection it used to be :(
-		# Handle a Yahoo unhandled error page ;)
-		if ($content =~ /Unfortunately, we are unable to process your request at this time/i) {
-			print STDERR "[http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] has resulted in an unhandled exception in Yahoo\n" if $VERBOSE;
-			# Hmm is it better to exit here or loop on unhandled error for the next 10,000 messages ?
-			exit;
+		# Is this the holding page when Yahoo is blocking your requests ?
+		# Assuming we are being blocked - lets pause rather than get sacrificed
+		while ($content =~ /Unfortunately, we are unable to process your request at this time/i) {
+			print STDERR "[http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] Yahoo has blocked us ?\n" if $VERBOSE;
+			sleep(3600*$cycle);
+			$url = "http://groups.yahoo.com/group/$group/message/$messageid?source=1\&unwrap=1";
+			$request = GET $url;
+			sleep($HUMAN_WAIT + int(rand($HUMAN_REFLEX)));
+			$response = $ua->simple_request($request);
+			if ($response->is_error) {
+				print STDERR "[http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] " . $response->as_string . "\n" if $VERBOSE;
+				exit;
+			}
+			$cookie_jar->extract_cookies($response);
+			while ( $response->is_redirect ) {
+				$url = GetRedirectUrl($response);
+				$request = GET $url;
+				$response = $ua->simple_request($request);
+				if ($response->is_error) {
+					print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
+					exit;
+				}
+				$cookie_jar->extract_cookies($response);
+			}
+			$content = $response->content;
+			$cycle++;
 		}
 
 		# If the page comes up with just a advertizement without the message.
@@ -306,6 +338,16 @@ eval {
 				exit;
 			}
 			$cookie_jar->extract_cookies($response);
+			while ( $response->is_redirect ) {
+				$url = GetRedirectUrl($response);
+				$request = GET $url;
+				$response = $ua->simple_request($request);
+				if ($response->is_error) {
+					print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
+					exit;
+				}
+				$cookie_jar->extract_cookies($response);
+			}
 			$content = $response->content;
 		}
 
@@ -352,6 +394,15 @@ if ($@) {
 	die $@;
 }
 
+
+sub terminate {
+	my ($message) = @_;
+
+	print STDERR "\t$message\n";
+	exit;
+}
+
+
 sub GetRedirectUrl {
 	my ($response) = @_;
 	my $url = $response->header('Location') || return undef;
@@ -363,3 +414,4 @@ sub GetRedirectUrl {
 
 	return $url;
 }
+
