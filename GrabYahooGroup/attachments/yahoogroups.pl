@@ -78,8 +78,11 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 		}
 	}
 	$cookie_jar->extract_cookies($response);
-	
+
+	$content = $response->content;
+
 	print "Already logged in continuing.\n" if $VERBOSE; 
+
 } else {
 	unless ($username) {
 		print "Enter username : ";
@@ -126,17 +129,17 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 		}
 	}
 	$cookie_jar->extract_cookies($response);
-	
+
+	$content = $response->content;
+
 	die "Couldn't log in $username\n" if ( !$response->is_success );
-	
+
 	die "Wrong password entered for $username\n" if ( $content =~ /Invalid Password/ );
-	
+
 	die "Yahoo user $username does not exist\n" if ( $content =~ /ID does not exist/ );
-	
+
 	print "Successfully logged in as $username.\n" if $VERBOSE; 
 }
-
-$content = $response->content;
 
 if ($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) {
 	if ($GETADULT) {
