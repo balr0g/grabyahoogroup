@@ -1,0 +1,27 @@
+Needs atleast one parameter : the group to be downloaded.
+
+[MANDATORY] group to download
+
+The script will output a tab separated file with as much data as it can extract
+If there is any data which is visible on the web and not in the output please
+contact the author.
+Note: You can save the output as a .xls file and MS Excel will pick it up
+correctly.
+
+------------------------
+[AVAILABLE OPTIONS]
+verbose => default off - says what the script is doing
+getadult => default on - get details even from adult groups
+username => your yahoo userid
+password => yahoo password
+http_proxy => HTTP proxy in http://hostname:port/ format
+timeout => connection time out for HTTP requests
+user_agent => browser being used - Changing this value is probably unethical at
+              the least and possible illegal at the worst
+
+------------------------
+[EXAMPLE]
+
+Normal run : ./yahoogroups_members.pl <group name>
+
+Debug run : ./yahoogroups_members.pl --verbose=1 <group name>
