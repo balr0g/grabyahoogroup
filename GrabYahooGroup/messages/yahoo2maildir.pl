@@ -303,12 +303,24 @@ my $HTTP_PROXY_URL = ''; # Proxy server if any http://hostname:port/
 my $TIMEOUT = 10; # Connection timeout changed from default 3 min for slow connection/server
 my $USER_AGENT = 'GrabYahoo/1.00'; # Changing this value is probably unethical at the least and possible illegal at the worst
 
-my ($user_group, $begin_msgid, $end_msgid) = @ARGV;
+my ($user_group, $bmsg, $emsg) = @ARGV;
 
 die "Please specify a group to process\n" unless $user_group;
 
-if ($begin_msgid) { die "Begin message id should be integer\n" unless ($begin_msgid =~ /^\d*$/); }
-if ($end_msgid) { die "End message id should be integer\n" unless ($end_msgid =~ /^\d*$/); }
+my $begin_msgid;
+my $end_msgid;
+
+if ($bmsg =~ /^(\d+)$/) {
+	$begin_msgid = $1;
+} else {
+	die "Begin message id should be integer\n";
+}
+if ($emsg =~ /^(\d+)$/) {
+	$end_msgid = $1;
+} else {
+	die "End message id should be integer\n";
+}
+
 die "End message id : $end_msgid should be greater than begin message id : $begin_msgid\n" if ($end_msgid and $end_msgid < $begin_msgid);
 
 my ($group) = $user_group =~ /^([\w_\-]+)$/;
