@@ -20,10 +20,13 @@ verboose mode.
 # Mandatory : group to download
 # Optional : begining message id and ending message id.
 
+Note: RedHat 8.0/9.0 by default assume every file including temporary files to
+      be UTF-8 encoded. Change the environment variable LANG to a non UTF-8 value.
+
 ------------------------
 
-To run : ./yahoogroups.pl <group name> [<begin message id> [<end message id>]]
+To run : yahoogroups.pl <group name> [<begin message id> [<end message id>]]
 
-Verbose mode : env DEBUG=1 ./yahoogroups.pl <group name> [<begin message id> [<end message id>]]
+Quite mode : env VERBOSE=0 yahoogroups.pl <group name> [<begin message id> [<end message id>]]
 
-Verbose mode with unicode support turned off : env DEBUG=1 LANG=C ./yahoogroups.pl <group name> [<begin message id> [<end message id>]]
+Verbose mode with unicode support turned off : env VERBOSE=0 LANG=en_US yahoogroups.pl <group name> [<begin message id> [<end message id>]]
