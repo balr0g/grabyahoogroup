@@ -31,6 +31,9 @@ my $SAVEALL = 0; # Force download every file even if the file exists locally.
 
 my $GETADULT = 1; # Allow adult groups to be downloaded.
 
+my $COOKIE_SAVE = 1; # Save cookies before finishing - wont if aborted.
+my $COOKIE_LOAD = 1; # Load cookies if saved from previous session.
+
 $| = 1 if ($DEBUG); # Want to see the messages immediately if I am in debug mode
 
 my $username = 'username'; # Better here than the commandline.
@@ -58,55 +61,17 @@ die "$! : $group\n" unless chdir $group;
 # Logon to Yahoo
 
 my $ua = LWP::UserAgent->new;
+$ua->proxy('http', 'http://192.168.8.44:8080/');
 $ua->agent('GrabYahooGroup/0.04');
-my $cookie_jar = HTTP::Cookies->new();
+my $cookie_jar = HTTP::Cookies->new( 'file' => 'yahoogroups.cookies' );
 $ua->cookie_jar($cookie_jar);
-my $request = POST 'http://login.yahoo.com/config/login',
-	[
-	 '.tries' => '1',
-	 '.done'  => "http://groups.yahoo.com/group/$group/",
-	 '.src'   => 'ym',
-	 '.intl'  => 'us',
-	 'login'  => $username,
-	 'passwd' => $password
-	];
-
-$request->content_type('application/x-www-form-urlencoded');
-$request->header('Accept' => '*/*');
-$request->header('Allowed' => 'GET HEAD PUT');
-my $response = $ua->simple_request($request);
+my $request;
+my $response;
 my $url;
-while ( $response->is_redirect ) {
-	$cookie_jar->extract_cookies($response);
-	$url = GetRedirectUrl($response);
-	$request = GET $url;
-	$response = $ua->simple_request($request);
-}
-
-die "Couldn't log in $username\n" if ( !$response->is_success );
-
-my $content = $response->content;
-
-$content = HTML::Entities::decode($content);
-
-die "Wrong password entered for $username\n" if ( $content =~ /Invalid Password/ );
-
-die "Yahoo user $username does not exist\n" if ( $content =~ /ID does not exist/ );
-
-
-print "Successfully logged in as $username.\n" if $DEBUG; 
-
-if ($GETADULT) {
-	$request = POST 'http://groups.yahoo.com/adultconf',
-		[
-		 'ref' => '',
-		 'dest'  => "/group/$group/messages",
-		 'accept' => 'I Accept'
-		];
-	
-	$request->content_type('application/x-www-form-urlencoded');
-	$request->header('Accept' => '*/*');
-	$request->header('Allowed' => 'GET HEAD PUT');
+my $content;
+if ($COOKIE_LOAD and -f 'yahoogroups.cookies') {
+	$cookie_jar->load();
+	$request = GET "http://groups.yahoo.com/group/$group/messages";
 	$response = $ua->simple_request($request);
 	
 	while ( $response->is_redirect ) {
@@ -116,7 +81,64 @@ if ($GETADULT) {
 		$response = $ua->simple_request($request);
 	}
 	
-	print "$username confirmed as a adult\n" if $DEBUG;
+	print "Found $username and logged in.\n" if $DEBUG; 
+	
+} else {
+	$request = POST 'http://login.yahoo.com/config/login',
+		[
+		 '.tries' => '1',
+		 '.done'  => "http://groups.yahoo.com/group/$group/",
+		 '.src'   => 'ym',
+		 '.intl'  => 'us',
+		 'login'  => $username,
+		 'passwd' => $password
+		];
+	
+	$request->content_type('application/x-www-form-urlencoded');
+	$request->header('Accept' => '*/*');
+	$request->header('Allowed' => 'GET HEAD PUT');
+	$response = $ua->simple_request($request);
+	while ( $response->is_redirect ) {
+		$cookie_jar->extract_cookies($response);
+		$url = GetRedirectUrl($response);
+		$request = GET $url;
+		$response = $ua->simple_request($request);
+	}
+	
+	die "Couldn't log in $username\n" if ( !$response->is_success );
+	
+	$content = $response->content;
+	
+	$content = HTML::Entities::decode($content);
+	
+	die "Wrong password entered for $username\n" if ( $content =~ /Invalid Password/ );
+	
+	die "Yahoo user $username does not exist\n" if ( $content =~ /ID does not exist/ );
+	
+	print "Successfully logged in as $username.\n" if $DEBUG; 
+	
+	if ($GETADULT) {
+		$request = POST 'http://groups.yahoo.com/adultconf',
+			[
+			 'ref' => '',
+			 'dest'  => "/group/$group/messages",
+			 'accept' => 'I Accept'
+			];
+		
+		$request->content_type('application/x-www-form-urlencoded');
+		$request->header('Accept' => '*/*');
+		$request->header('Allowed' => 'GET HEAD PUT');
+		$response = $ua->simple_request($request);
+		
+		while ( $response->is_redirect ) {
+			$cookie_jar->extract_cookies($response);
+			$url = GetRedirectUrl($response);
+			$request = GET $url;
+			$response = $ua->simple_request($request);
+		}
+		
+		print "$username confirmed as a adult\n" if $DEBUG;
+	}
 }
 
 unless ($begin_msgid) {
@@ -173,6 +195,12 @@ foreach my $messageid (reverse $begin_msgid..$end_msgid) {
 	}
 	print "\n" if $DEBUG;
 	die "$!\n" unless chdir '../';
+}
+
+$cookie_jar->save if $COOKIE_SAVE;
+
+sub DESTROY {
+	$cookie_jar->save if $COOKIE_SAVE;
 }
 
 sub GetRedirectUrl($) {
