@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.1.1.2 2005-03-30 19:51:26 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.1.1.3 2005-04-01 20:00:35 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
@@ -16,24 +16,20 @@ if ( ref($gyg) eq 'GrabYahoo' ) {
 
 package GrabYahoo;
 
-use GetOpt::Long;
+use Getopt::Long;
 
 sub new {
 
 	my $MODULE = { "MESSAGES" => sub { my ($begin, $end) = @_;
-					use GrabYahoo::Messages;
 					my $module = new GrabYahoo::Messages($begin, $end);
 					return $module; },
-		    "FILES" =>	  sub { use GrabYahoo::Files;
-					my $module = new GrabYahoo::Files;
+		    "FILES" =>	  sub { my $module = new GrabYahoo::Files;
 					return $module; },
-		    "PHOTOS" =>	  sub { use GrabYahoo::Photos;
-					my $module = new GrabYahoo::Photos;
+		    "PHOTOS" =>	  sub { my $module = new GrabYahoo::Photos;
 					return $module; },
-		    "MEMBERS" =>  sub { use GrabYahoo::Members;
-					my $module = new GrabYahoo::Members;
+		    "MEMBERS" =>  sub { my $module = new GrabYahoo::Members;
 					return $module; }
-		  }
+		  };
 
 	my $VERBOSE = 1;
 
@@ -92,7 +88,7 @@ sub new {
 
 	my $active_module = '';
 	foreach my $module ("MESSAGES", "FILES", "PHOTOS", "MEMBERS") {
-		next unless $$module;
+		next unless $module;
 		unless ($active_module) {
 			$active_module = $module;
 		} else {
@@ -115,9 +111,9 @@ sub new {
 	my $module = $MODULE->{$active_module};
 	my $self = &$module;
 
-	my $client = new GrabYahoo::Client($VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE);
+	my $client = new GrabYahoo::Client($VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $group);
 
-	$client->set_group_url();
+	$client->set_group_url($group);
 
 	$self->{'GROUP'} = $group;
 	$self->{'CLIENT'} = $client;
@@ -137,7 +133,7 @@ sub new {
 
 sub process {
 	my $self = shift;
-
+}
 
 1;
 
@@ -167,7 +163,7 @@ use LWP::Simple ();
 sub new {
 	my $package = shift;
 
-	my ($VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE) = @_;
+	my ($VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $group) = @_;
 
 	srand(time() . $$) if $HUMAN_BEHAVIOR;
 
@@ -207,6 +203,8 @@ sub new {
 
 sub set_group_url {
 	my $self = shift;
+
+	my ($group) = @_;
 
 	$self->retrieve("/group/$group/");
 
