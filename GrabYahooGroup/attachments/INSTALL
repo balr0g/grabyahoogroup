@@ -17,4 +17,4 @@ In RedHat 8.0 and RedHat 9.0 I have circumvented the problem by setting the
 environment variable LANG to C. Setting this system wide might not be acceptable
 therefore I would recommend running the script as 
 
-env LANG=C ./yahoogroups.pl <group name>
+env LANG=en_US ./yahoogroups.pl <group name>

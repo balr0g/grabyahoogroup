@@ -1,25 +1,6 @@
-#!/usr/bin/perl -w
+#!/usr/bin/perl -wT
 
-# Inspired by Ravi Ramkissoon's fetchyahoo utility.
-# [http://fetchyahoo.twizzler.org/]
-# The basic mechanism for logging on to Yahoo has been taken from his program.
-#
-# Needs atleast one parameter : the group to be downloaded.
-# You can also provide the begin and end message id to download.
-
-# If you dont want to keep a file yet skip its download make it a zero byte file
-#
-# The program will create a directory in the current directory for every group
-# it downloads. Each message id will have a separate directory and the
-# attachments will be named as provided by the poster. It sanitizes the
-# filename by throwing out all the non word characters excluding "." from the
-# filename.
-# 
-# By default the tool will run in quite mode assuming the user wants to run it
-# in batchmode. Set a environment variable DEBUG to a true value to run in
-# verboose mode.
-#
-# Adapted by : Mithun Bhattacharya [mithun at users sourceforge net] 9/9/2002
+delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
 use strict;
 
@@ -28,7 +9,6 @@ use HTTP::Cookies ();
 use LWP::UserAgent ();
 use LWP::Simple ();
 use HTML::Entities;
-use Cwd qw(abs_path);
 sub GetRedirectUrl($);
 
 my $unmangle_data = <<'EOF';
@@ -184,7 +164,7 @@ my $unmangle_data = <<'EOF';
 149::::::V::o::::3:::t:f::M::T:K:~:::m::::::::::::x::%::::::v:X::::::::9::::!:::^:::::::Q::h
 150::::d:::::::::f:w::}::::.:=:::P::p:3:::L::G:?:::::::::l::6:U:::e:^::}:n:v::$:-::9::::::n:::n:::%:::{::b
 151::L:#:::::*:I:::N:::::P:,:C::L:#::::!:c:::::{::::::W::::::::::P:::::D::0:::C:8:::::::::O:V:::::::?
-152:::U::p::::0:::C:u:m:::::.:::2:::G:t:.:::b::V:`::0::::::p:::::H:S:::::d::::::::X:W::::::{:::::::?:r
+152:::U::p::::0:::C:u:m:::::.:::2:::G:t:.:::b::V:`::0::::::p:::::H:S:::::d::::::::X:W::::::{:::::::?:r::c
 153:,:::1::l:::::X:::::j:::^::::::J::::::::::Y:m::$::::::::%::H:N:b:_::7:z:::c:8:5:$:}::7:::::?:Q::::::w:::::::::v
 154::p::x::d::m:::*:M:::::X::::::j::b:q::g::::%:a::::::~::s:}::r:::::::::::::1:~::::::::::K:1::::C
 155:::::::::::j:R:7:::::{:8::!:0:^::::%:z:s:::a:::::?:::3:::V:%::u::L::w:::r:!:::3::::::::L:::C::8:f:::::o
@@ -203,10 +183,10 @@ my $unmangle_data = <<'EOF';
 168::::::::u::f::::4:::::J:::::::z:::::::::Z:::w::m::i:::P::2:::P:::Z:::c:m:,::8:::::::C:::4:*:P::::r
 169:#:6:::::a::::}::::q::y::T:::::$:::::::::6:::::::::6:z::::::::::::::::::::::::i::m:5::::0:R:l
 170:::::::h::A::$::G:C:::::=::::::w::r:::=:::|:r::9:::::!:::::l:U:::E::_:O:w::U::::O:::::::+:m:::m:::::q
-171:::X::N::p:b::%:::5:6:D::2:c::::x:%::H:C::::::$:s:::::::::b::d::::E:::::::5::y::^:::K::::_:::::.::3
+171:::X::N::p:b::%:::5:6:D::2:c::::x:%::H:C::::::$:s:::::::::b::d::::E:::::::5::y::^:::K::::_:::::.::3::::::m
 172:::=::%::n::::r:::V:I::::i:V:.:::::3:7::::S::::::::@:H::::J::$::::::g:::I:A::p::::::::-:r::G::U:N:::H
 173:J::::::::E::::::5::+::e::::::x:::::::B::I::Z::8::::J::a:::O::::o:::::::-:::1:::::::::::Q:+
-174:M:::::R::!::?:::b::|::?:::::::3::::::::l:::I:O::::o:#::i::::*::d::F:::{:S:.::::::D:r:4:::::::::::_
+174:M:::::R::!::?:::b::|::?:::::::3::::::::l:::I:O::::o:#::i::::*::d::F:::{:S:.::::::D:r:4:::::::::::_:::o
 175:::::t::|:2:a:::::K:0:-::k:::O:V::::5::_:::`::::::F::,:::U:::::::::::T:i::E:`::k:%:::i:::::h::w:w:?::Y::::::::G
 176::i::::::::p:o::F:}::::l:::^:::x::e:::::z::I:::o::::k:3:::::::p:I:::::A::::#:L:@::::j::t::::z:#
 177:::j:::#:~::::::e::::::::::@::::::C:m::::?::e:::::?::::::}:z:::M::2::o:::A::l:l:::h::v:::K:::::f::Y
@@ -315,26 +295,21 @@ my $username = ''; # Better here than the commandline.
 my $password = ''; # Better here than the commandline.
 my $HTTP_PROXY_URL = ''; # Proxy server if any http://hostname:port/
 
-# Mandatory : group to download
-# Optional : begining message id and ending message id - give both or none.
+my ($user_group, $begin_msgid, $end_msgid) = @ARGV;
 
-my ($group, $begin_msgid, $end_msgid) = @ARGV;
+die "Please specify a group to process\n" unless $user_group;
 
-die "Please specify a group to process\n" unless $group;
+if ($begin_msgid) { die "Begin message id should be integer\n" unless ($begin_msgid =~ /^\d*$/); }
+if ($end_msgid) { die "End message id should be integer\n" unless ($end_msgid =~ /^\d*$/); }
+die "End message id : $end_msgid should be greater than begin message id : $begin_msgid\n" if ($end_msgid and $end_msgid < $begin_msgid);
 
-if ($begin_msgid) {
-	die "Msg id's should be integers\n" unless ($begin_msgid =~ /^\d*$/);
-	die "You must specify both/neither of begining and ending message id\n" unless $end_msgid;
-	die "Msg id's should be integers\n" unless ($end_msgid =~ /^\d*$/);
-}
+my ($group) = $user_group =~ /^([\w_\-]+)$/;
 
 unless (-d $group or mkdir $group) {
 	print STDERR "$! : $group\n" if $DEBUG;
 }
 
-die "$! : $group\n" unless chdir $group;
-
-my $Cookie_file = abs_path('yahoogroups.cookies');
+my $Cookie_file = "$group/yahoogroups.cookies";
 
 # Logon to Yahoo
 
@@ -436,15 +411,19 @@ if ($GETADULT) {
 }
 
 eval {
-	unless ($begin_msgid) {
+	my $b;
+	my $e;
+	unless ($end_msgid) {
 		$content = $response->content;
-		$content = HTML::Entities::decode($content);
-		($begin_msgid, $end_msgid) = $content =~ /(\d+)-\d+ of (\d+) /;
-		die "Couldn't get message count" unless $end_msgid;
+		($b, $e) = $content =~ /(\d+)-\d+ of (\d+) /;
+		die "Couldn't get message count" unless $e;
 	}
+	$begin_msgid = $b unless $begin_msgid;
+	$end_msgid = $e unless $end_msgid;
+	die "End message id :$end_msgid should be greater than begin message id : $begin_msgid\n" if ($end_msgid < $begin_msgid);
 
 	foreach my $messageid ($begin_msgid..$end_msgid) {
-		next if $REFRESH and -f $messageid;
+		next if $REFRESH and -f "$group/$messageid";
 		print "$messageid: " if $DEBUG;
 
 		$url = "http://groups.yahoo.com/group/$group/message/$messageid?source=1\&unwrap=1";
@@ -457,20 +436,18 @@ eval {
 			$response = $ua->simple_request($request);
 		}
 		$content = $response->content;
-		$content = HTML::Entities::decode($content);
 		# If the page comes up with just a advertizement without the message.
 		if ($content =~ /Continue to message/s) {
 			$url = "http://groups.yahoo.com/group/$group/message/$messageid?source=1\&unwrap=1";
 			$request = GET $url;
 			$response = $ua->simple_request($request);
 			$content = $response->content;
-			$content = HTML::Entities::decode($content);
 		}
 
 		# If the page has been purged from the system
 		if ($content =~ /Message $messageid does not exist in $group/s) {
 			print "\tmessage purged from the system\n" if $DEBUG;
-			open (MFD, "> $messageid");
+			open (MFD, "> $group/$messageid");
 			close MFD;
 			next;
 		}
@@ -478,7 +455,8 @@ eval {
 		my ($email_body) = $content =~ /<x-html>.+?<table.+?<tt>(.+?)<\/tt>/s;
 		$email_body =~ s/<br>//sgi;
 		$email_body =~ s/<a.+?protectID=(.+?)".+?<\/a>/&extract_email($1)/esg;
-		open (MFD, "> $messageid");
+		$email_body = HTML::Entities::decode($email_body);
+		open (MFD, "> $group/$messageid");
 		print MFD $email_body;
 		close MFD;
 		print "\n" if $DEBUG;
@@ -513,7 +491,8 @@ sub extract_email {
 		if ( defined $unmangling_table{$nums[$x]}[$x] and $unmangling_table{$nums[$x]}[$x] ne "" ) {
 			$email .= $unmangling_table{$nums[$x]}[$x];
 		} else {
-			die "\nUnknown unmangling entry: (" . $nums[$x] . ", " . $x . ")\n";
+			print STDERR "\nUnknown unmangling entry: (" . $nums[$x] . ", " . $x . ")\n";
+			$email .= "*";
 		}
 	}
 
