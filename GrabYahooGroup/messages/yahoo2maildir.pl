@@ -508,6 +508,7 @@ eval {
 		my ($email_body) = $content =~ /<x-html>.+?<table.+?<tt>(.+?)<\/tt>/s;
 		$email_body =~ s/<br>//sgi;
 		$email_body =~ s/<a.+?protectID=(.+?)".+?<\/a>/&extract_email($1)/esg;
+		$email_body =~ s/<a href=".+?>(.+?)<\/a>/$1/g; # Yahoo hyperlinks every URL which is not already a hyperlink.
 		$email_body = HTML::Entities::decode($email_body);
 		open (MFD, "> $group/$messageid");
 		print MFD $email_body;
