@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.9 2005-03-19 10:44:01 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.10 2005-03-20 20:35:50 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -269,7 +269,7 @@ eval {
 	terminate("End message id :$end_msgid should be greater than begin message id : $begin_msgid") if ($end_msgid < $begin_msgid);
 
 	if ($end_msgid > $e) {
-		print STDERR "End message id is greater than what is reported by Yahoo - adjusting value to $e\n");
+		print STDERR "End message id is greater than what is reported by Yahoo - adjusting value to $e\n";
 		$end_msgid = $e;
 	}
 
