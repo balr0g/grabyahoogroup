@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.1.1.1 2005-03-26 16:19:45 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.1.1.2 2005-03-30 19:51:26 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
@@ -20,7 +20,7 @@ use GetOpt::Long;
 
 sub new {
 
-	$MODULE = { "MESSAGES" => sub { my ($begin, $end) = @_;
+	my $MODULE = { "MESSAGES" => sub { my ($begin, $end) = @_;
 					use GrabYahoo::Messages;
 					my $module = new GrabYahoo::Messages($begin, $end);
 					return $module; },
@@ -117,6 +117,8 @@ sub new {
 
 	my $client = new GrabYahoo::Client($VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE);
 
+	$client->set_group_url();
+
 	$self->{'GROUP'} = $group;
 	$self->{'CLIENT'} = $client;
 
@@ -136,7 +138,6 @@ sub new {
 sub process {
 	my $self = shift;
 
-}
 
 1;
 
@@ -188,7 +189,34 @@ sub new {
 	$self->{'USER_AGENT'} = $USER_AGENT;
 	$self->{'SNOOZE'} = $SNOOZE;
 
+	my $Cookie_file = "$group/yahoogroups.cookies";
+
+	my $ua = new LWP::UserAgent;
+	$ua->proxy('http', $PROXY) if $PROXY;
+	$ua->agent($USER_AGENT);
+	$ua->timeout($TIMEOUT*60);
+	my $cookie_jar = HTTP::Cookies->new( 'file' => $Cookie_file );
+	$ua->cookie_jar($cookie_jar);
+
+	$self->{'UA'} = $ua;
+
+	$self->{'GROUP_URL'} = 'groups.yahoo.com';
+
 	return bless $self;
+}
+
+sub set_group_url {
+	my $self = shift;
+
+	$self->retrieve("/group/$group/");
+
+	($self->{'GROUP_URL'}) = $self->{'LAST_URL'} =~ /http:\/\/(.+?groups\.yahoo\.com)/;
+}
+
+sub retrieve {
+	my $self = shift;
+
+	my ($url) = @_;
 }
 
 1;
