@@ -1,0 +1,30 @@
+Inspired by Ravi Ramkissoon's fetchyahoo utility.
+[http://fetchyahoo.twizzler.org/]
+and by  Vadim Zeitlin's yahoo2mbox utility.
+[http://www.lpthe.jussieu.fr/~zeitlin/yahoo2mbox.html]
+
+The basic mechanism for logging on to Yahoo has been taken from fetchyahoo and
+email address unmangling has been taken from yahoo2mbox.
+
+Needs atleast one parameter : the group to be downloaded.
+You can also provide the begin and end message id to download.
+
+If you dont want to keep a file yet skip its download make it a zero byte file
+
+The program will create a directory in the current directory for every group
+it downloads. Each message id will be a separate file in that folder.
+
+By default the tool will run in quite mode assuming the user wants to run it
+in batchmode. Set a environment variable DEBUG to a true value to run in
+verboose mode.
+
+# Mandatory : group to download
+# Optional : begining message id and ending message id.
+
+------------------------
+
+To run : ./yahoo2mailbox.pl <group name> [<begin message id> [<end message id>]]
+
+Verbose mode : env DEBUG=1 ./yahoo2mailbox.pl <group name> [<begin message id> [<end message id>]]
+
+Verbose mode with unicode support turned off : env DEBUG=1 LANG=C ./yahoo2mailbox.pl <group name> [<begin message id> [<end message id>]]
