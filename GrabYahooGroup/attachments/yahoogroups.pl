@@ -127,8 +127,8 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 			print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
 			exit;
 		}
+		$cookie_jar->extract_cookies($response);
 	}
-	$cookie_jar->extract_cookies($response);
 
 	$content = $response->content;
 
@@ -141,7 +141,7 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 	print "Successfully logged in as $username.\n" if $VERBOSE; 
 }
 
-if ($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) {
+if ($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/i) {
 	if ($GETADULT) {
 		$request = POST 'http://groups.yahoo.com/adultconf',
 			[
@@ -168,8 +168,10 @@ if ($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) {
 				print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
 				exit;
 			}
+			$cookie_jar->extract_cookies($response);
 		}
-		$cookie_jar->extract_cookies($response);
+
+		$content = $response->content;
 	
 		print "Confirmed as a adult\n" if $VERBOSE;
 	} else {
