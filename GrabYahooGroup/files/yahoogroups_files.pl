@@ -1,5 +1,7 @@
 #!/usr/bin/perl -wT
 
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.3 2004-08-16 05:52:43 mithun Exp $
+
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
 use strict;
@@ -32,7 +34,7 @@ my $TIMEOUT = 10; # Connection timeout changed from default 3 min for slow conne
 my $USER_AGENT = 'GrabYahoo/1.00'; # Changing this value is probably unethical at the least and possible illegal at the worst
 my ($user_group) = @ARGV;
 
-die "Please specify a group to process\n" unless $user_group;
+terminate("Please specify a group to process") unless $user_group;
 
 my ($group) = $user_group =~ /^([\w_\-]+)$/;
 
@@ -171,11 +173,11 @@ sub download_folder {
 	
 		$content = $response->content;
 	
-		die "Couldn't log in $username\n" if ( !$response->is_success );
+		terminate("Couldn't log in $username") if ( !$response->is_success );
 	
-		die "Wrong password entered for $username\n" if ( $content =~ /Invalid Password/ );
+		terminate("Wrong password entered for $username") if ( $content =~ /Invalid Password/ );
 	
-		die "Yahoo user $username does not exist\n" if ( $content =~ /ID does not exist/ );
+		terminate("Yahoo user $username does not exist") if ( $content =~ /ID does not exist/ );
 	
 		print "Successfully logged in as $username.\n" if $VERBOSE; 
 	}
@@ -220,9 +222,11 @@ sub download_folder {
 	}
 	
 	eval {
-		die "Yahoo error : database unavailable" if $content =~ /The database is unavailable at the moment/;
+		terminate("Yahoo error : not a member of this group") if $content =~ /You are not a member of the group /;
+		terminate("Yahoo error : nonexistant group") if $content =~ /There is no group called /;
+		terminate("Yahoo error : database unavailable") if $content =~ /The database is unavailable at the moment/;
 		my ($cells) = $content =~ /<!-- start content include -->\s+(.+?)\s+<!-- end content include -->/s;
-		while ($cells =~ /<font size="-1">\s+<a href="(.+?)">(.+?)<\/a>\s+<\/font>.+?<\/tr>/sg) {
+		while ($cells =~ /<tr valign=top.+?<a href="(.+?)">(.+?)<\/a>\s+<br>.+?<\/tr>/sg) {
 			my $file_url = $1;
 			my $file_name = $2;
 			next if -f "$group$sub_folder/$file_name";
@@ -261,8 +265,14 @@ sub download_folder {
 				$content = $response->content;
 			}
 			$cookie_jar->extract_cookies($response);
+
+			terminate("Yahoo error : group download limit exceeded") if (($content =~ /The document you requested is temporarily unavailable because this group\s+has exceeded its download limit/s) and $VERBOSE);
+			if (($content =~ /The document you requested is temporarily unavailable because you\s+has exceeded its download limit/s) and $VERBOSE) {
+				print STDERR "Yahoo error : user download limit exceeded";
+				next;
+			}
 		
-			die "$! : $file_name\n" unless open(IFD, "> $group$sub_folder/$file_name");
+			terminate("$! : $file_name") unless open(IFD, "> $group$sub_folder/$file_name");
 			print IFD $content;
 			close IFD;
 			print ".. done\n" if $VERBOSE;
@@ -276,6 +286,15 @@ sub download_folder {
 		die $@;
 	}
 }
+
+
+sub terminate {
+	my ($message) = @_;
+
+	print STDERR "\t$message\n";
+	exit;
+}
+
 
 sub GetRedirectUrl($) {
 	my ($response) = @_;
