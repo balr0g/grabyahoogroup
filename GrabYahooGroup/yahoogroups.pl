@@ -34,6 +34,7 @@ sub GetRedirectUrl($);
 my $DEBUG = 1 if $ENV{'DEBUG'};
 
 my $SAVEALL = 0; # Force download every file even if the file exists locally.
+my $REFRESH = 1; # Download only those messages which dont already exist.
 
 my $GETADULT = 1; # Allow adult groups to be downloaded.
 
@@ -42,9 +43,9 @@ my $COOKIE_LOAD = 1; # Load cookies if saved from previous session.
 
 $| = 1 if ($DEBUG); # Want to see the messages immediately if I am in debug mode
 
-my $username = 'username'; # Better here than the commandline.
-my $password = 'password'; # Better here than the commandline.
-my $HTTP_PROXY_URL = 'http://hostname:port/'; # Proxy server if any.
+my $username = ''; # Better here than the commandline.
+my $password = ''; # Better here than the commandline.
+my $HTTP_PROXY_URL = ''; # Proxy server if any http://hostname:port/
 
 # Mandatory : group to download
 # Optional : begining message id and ending message id - give both or none.
@@ -59,7 +60,7 @@ if ($begin_msgid) {
 	die "Msg id's should be integers\n" unless ($end_msgid =~ /^\d*$/);
 }
 
-unless (mkdir $group) {
+unless (-d $group or mkdir $group) {
 	print STDERR "$! : $group\n" if $DEBUG;
 }
 
@@ -88,9 +89,25 @@ if ($COOKIE_LOAD and -f 'yahoogroups.cookies') {
 		$response = $ua->simple_request($request);
 	}
 	
-	print "Found $username and logged in.\n" if $DEBUG; 
+	print "Already logged in continuing.\n" if $DEBUG; 
 	
 } else {
+	unless ($username) {
+		print "Enter username : ";
+		$username = <STDIN>;
+		chomp $username;
+	}
+
+	unless ($password) {
+		use Term::ReadKey;
+		ReadMode('noecho');
+		print "Enter password : ";
+		$password = ReadLine(0);
+		ReadMode('restore');
+		chomp $password;
+		print "\n";
+	}
+
 	$request = POST 'http://login.yahoo.com/config/login',
 		[
 		 '.tries' => '1',
@@ -157,9 +174,10 @@ unless ($begin_msgid) {
 }
 
 foreach my $messageid (reverse $begin_msgid..$end_msgid) {
-	unless (mkdir $messageid) {
+	unless (-d $messageid or mkdir $messageid) {
 		print STDERR "$! : $messageid\n" if $DEBUG;
 	}
+	next if $REFRESH and -d ($messageid - 1);
 	print "$messageid: " if $DEBUG;
 	die "$! : $messageid\n" unless chdir $messageid;
 
@@ -183,10 +201,10 @@ foreach my $messageid (reverse $begin_msgid..$end_msgid) {
 		$content = HTML::Entities::decode($content);
 	}
 
-	my @attachments = $content =~ /Attachment.*?<B>(.*?href=".*?)"/sg;
+	my @attachments = $content =~ /<center><B>Attachment<\/center>.*?<B>(.*?href=".*?)"/sg;
 	foreach my $attach (@attachments) {
 		my ($filename, $imageurl) = $attach =~ /(.*?)<\/B>.*?href="(.*)/s;
-		$filename =~ s/([^\w.]*)//g;
+		$filename =~ s/([^\w_\-.]*)//g;
 		if ($DEBUG and -f $filename) {
 			print "-";
 			next unless $SAVEALL; # Skip if file was downloaded previously
