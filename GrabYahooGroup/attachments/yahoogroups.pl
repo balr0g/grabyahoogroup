@@ -36,7 +36,7 @@ if ($begin_msgid) { die "Begin message id should be integer\n" unless ($begin_ms
 if ($end_msgid) { die "End message id should be integer\n" unless ($end_msgid =~ /^\d*$/); }
 die "End message id : $end_msgid should be greater than begin message id : $begin_msgid\n" if ($end_msgid and $end_msgid < $begin_msgid);
 
-my ($group) = $user_group =~ /^([\w_]+)$/;
+my ($group) = $user_group =~ /^([\w_\-]+)$/;
 
 unless (-d $group or mkdir $group) {
 	print STDERR "$! : $group\n" if $DEBUG;
