@@ -141,7 +141,7 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 	print "Successfully logged in as $username.\n" if $VERBOSE; 
 }
 
-if ($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/i) {
+if (($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) or ($content =~ /you have reached an age-restricted area of Yahoo! Groups/)) {
 	if ($GETADULT) {
 		$request = POST 'http://groups.yahoo.com/adultconf',
 			[
