@@ -44,6 +44,7 @@ $| = 1 if ($DEBUG); # Want to see the messages immediately if I am in debug mode
 
 my $username = 'username'; # Better here than the commandline.
 my $password = 'password'; # Better here than the commandline.
+my $HTTP_PROXY_URL = 'http://hostname:port/'; # Proxy server if any.
 
 # Mandatory : group to download
 # Optional : begining message id and ending message id - give both or none.
@@ -67,7 +68,7 @@ die "$! : $group\n" unless chdir $group;
 # Logon to Yahoo
 
 my $ua = LWP::UserAgent->new;
-$ua->proxy('http', 'http://192.168.8.44:8080/');
+$ua->proxy('http', $HTTP_PROXY_URL) if $HTTP_PROXY_URL;
 $ua->agent('GrabYahooGroup/0.04');
 my $cookie_jar = HTTP::Cookies->new( 'file' => 'yahoogroups.cookies' );
 $ua->cookie_jar($cookie_jar);
