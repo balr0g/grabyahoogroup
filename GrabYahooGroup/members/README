@@ -1,12 +1,10 @@
-Needs atleast one parameter : the group to be downloaded.
-
-[MANDATORY] group to download
-
 The script will output a tab separated file with as much data as it can extract
 If there is any data which is visible on the web and not in the output please
 contact the author.
 Note: You can save the output as a .xls file and MS Excel will pick it up
 correctly.
+
+[MANDATORY] group to download
 
 ------------------------
 [AVAILABLE OPTIONS]

@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/members/yahoogroups_members.pl,v 1.1 2004-10-04 11:53:45 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/members/yahoogroups_members.pl,v 1.2 2004-12-20 11:31:44 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -20,7 +20,6 @@ my $GETADULT = 1; # Allow adult groups to be downloaded.
 
 my $username = ''; # Better here than the commandline.
 my $password = '';
-$password = '' unless $password; # Better here than the commandline.
 my $HTTP_PROXY_URL = ''; # Proxy server if any http://hostname:port/
 my $TIMEOUT = 10; # Connection timeout changed from default 3 min for slow connection/server
 my $USER_AGENT = 'GrabYahoo/1.00'; # Changing this value is probably unethical at the least and possible illegal at the worst
