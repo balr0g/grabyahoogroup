@@ -1,26 +1,32 @@
-Inspired by Ravi Ramkissoon's fetchyahoo utility.
-[http://fetchyahoo.sourceforge.net/]
-
-The basic mechanism for logging on to Yahoo has been taken from fetchyahoo.
-
-Needs atleast one parameter : the group to be downloaded.
-
-If you don't want to keep a file yet skip its download make it a zero byte file
-
 The script will create a directory in the current directory for every group
 it downloads. Inside this folder the complete hierarchy will be replicated as
 present on Yahoo.
 
-By default the tool will run in verbose mode assuming the user wants to run it
-in batch mode. Set a environment variable DEBUG to a true value to run in
-verbose mode.
+[MANDATORY] group to download
 
-# Mandatory : group to download
+If you don't want to keep a file yet skip its download make it a zero byte file
+
+By default the tool will run in verbose mode assuming the user wants to run it
+in batch mode.
 
 ------------------------
+[AVAILABLE OPTIONS]
+verbose => default on - says what the script is doing
+getadult => default on - get details even from adult groups
+cookie_save => default on - save the user details via cookie
+cookie_load => default on - load the cookies saved in a previous session
+username => your yahoo userid
+password => yahoo password
+http_proxy => HTTP proxy in http://hostname:port/ format
+timeout => connection time out for HTTP requests
+user_agent => browser being used - Changing this value is probably unethical at
+              the least and possible illegal at the worst
+
+------------------------
+[EXAMPLE]
 
 To run : ./yahoogroups_files.pl <group name>
 
-Quite mode : env VERBOSE=0 ./yahoogroups_files.pl <group name>
+Quite mode : ./yahoogroups_files.pl --verbose=0 <group name>
 
-Quite mode with unicode support turned off : env VERBOSE=0 LANG=en_US ./yahoogroups_files.pl <group name>
+Quite mode with unicode support turned off : env LANG=en_US ./yahoogroups_files.pl --verbose=0 <group name>

@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.4 2004-08-31 12:39:57 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.5 2004-12-20 11:29:18 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -10,28 +10,34 @@ use HTTP::Request::Common qw(GET POST);
 use HTTP::Cookies ();
 use LWP::UserAgent ();
 use LWP::Simple ();
-sub GetRedirectUrl($);
+use Getopt::Long;
 
 # By default works in verbose mode unless VERBOSE=0 via environment variable for cron job.
 my $VERBOSE = 1;
-$VERBOSE = $ENV{'VERBOSE'} if $ENV{'VERBOSE'};
-
-my $SAVEALL = 0; # Force download every file even if the file exists locally.
-my $REFRESH = 1; # Download only those messages which dont already exist.
 
 my $GETADULT = 1; # Allow adult groups to be downloaded.
 
 my $COOKIE_SAVE = 1; # Save cookies before finishing - wont if aborted.
 my $COOKIE_LOAD = 1; # Load cookies if saved from previous session.
 
-$| = 1 if ($VERBOSE); # Want to see the messages immediately if I am in verbose mode
-
-my $username = ''; # Better here than the commandline.
-my $password = $ENV{'GY_PASSWD'};
-$password = '' unless $password; # Better here than the commandline.
+my $username = '';
+my $password = '';
 my $HTTP_PROXY_URL = ''; # Proxy server if any http://hostname:port/
 my $TIMEOUT = 10; # Connection timeout changed from default 3 min for slow connection/server
 my $USER_AGENT = 'GrabYahoo/1.00'; # Changing this value is probably unethical at the least and possible illegal at the worst
+
+my $result = GetOptions ('verbose=i' => \$VERBOSE,
+			 'getadult=i' => \$GETADULT,
+			 'cookie_save=i' => \$COOKIE_SAVE,
+			 'cookie_load=i' => \$COOKIE_LOAD,
+			 'username=s' => \$username,
+			 'password=s' => \$password,
+			 'http_proxy=s' => \$HTTP_PROXY_URL,
+			 'timeout=i' => \$TIMEOUT,
+			 'user_agent=s' => \$USER_AGENT);
+
+$| = 1 if ($VERBOSE); # Want to see the messages immediately if I am in verbose mode
+
 my ($user_group) = @ARGV;
 
 terminate("Please specify a group to process") unless $user_group;
@@ -39,7 +45,7 @@ terminate("Please specify a group to process") unless $user_group;
 my ($group) = $user_group =~ /^([\w_\-]+)$/;
 
 unless (-d $group or mkdir $group) {
-	print STDERR "$! : $group\n" if $VERBOSE;
+	print "$! : $group\n" if $VERBOSE;
 }
 
 my $Cookie_file = "$group/yahoogroups.cookies";
@@ -65,28 +71,20 @@ download_folder('');
 
 sub download_folder {
 	my ($sub_folder) = @_;
-	print "[$group]$sub_folder\n" if $VERBOSE;
+	# print "[$group]$sub_folder\n" if $VERBOSE;
 
-	unless (-d "$group$sub_folder" or mkdir "$group$sub_folder") {
-		print STDERR "$! : $group$sub_folder\n" if $VERBOSE;
-	}
+	terminate("$! : $group$sub_folder") unless (-d "$group$sub_folder" or mkdir "$group$sub_folder");
 
 	$request = GET "http://groups.yahoo.com/group/$group/files$sub_folder";
 	$response = $ua->simple_request($request);
-	if ($response->is_error) {
-		print STDERR "[http://groups.yahoo.com/group/$group/files$sub_folder] " . $response->as_string . "\n" if $VERBOSE;
-		exit;
-	}
+	terminate("[http://groups.yahoo.com/group/$group/files$sub_folder] " . $response->as_string) if $response->is_error;
 	
 	while ( $response->is_redirect ) {
 		$cookie_jar->extract_cookies($response);
 		$url = GetRedirectUrl($response);
 		$request = GET $url;
 		$response = $ua->simple_request($request);
-		if ($response->is_error) {
-			print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
-			exit;
-		}
+		terminate("[$url] " . $response->as_string) if ($response->is_error);
 	}
 	$cookie_jar->extract_cookies($response);
 	
@@ -155,19 +153,13 @@ sub download_folder {
 		$request->header('Accept' => '*/*');
 		$request->header('Allowed' => 'GET HEAD PUT');
 		$response = $ua->simple_request($request);
-		if ($response->is_error) {
-			print STDERR "[http://login.yahoo.com/config/login] " . $response->as_string . "\n" if $VERBOSE;
-			exit;
-		}
+		terminate("[http://login.yahoo.com/config/login] " . $response->as_string) if ($response->is_error);
 		while ( $response->is_redirect ) {
 			$cookie_jar->extract_cookies($response);
 			$url = GetRedirectUrl($response);
 			$request = GET $url;
 			$response = $ua->simple_request($request);
-			if ($response->is_error) {
-				print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
-				exit;
-			}
+			terminate("[$url] " . $response->as_string) if ($response->is_error);
 			$cookie_jar->extract_cookies($response);
 		}
 	
@@ -195,20 +187,14 @@ sub download_folder {
 			$request->header('Accept' => '*/*');
 			$request->header('Allowed' => 'GET HEAD PUT');
 			$response = $ua->simple_request($request);
-			if ($response->is_error) {
-				print STDERR "[http://groups.yahoo.com/adultconf] " . $response->as_string . "\n" if $VERBOSE;
-				exit;
-			}
+			terminate("[http://groups.yahoo.com/adultconf] " . $response->as_string) if ($response->is_error);
 		
 			while ( $response->is_redirect ) {
 				$cookie_jar->extract_cookies($response);
 				$url = GetRedirectUrl($response);
 				$request = GET $url;
 				$response = $ua->simple_request($request);
-				if ($response->is_error) {
-					print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
-					exit;
-				}
+				terminate("[$url] " . $response->as_string) if ($response->is_error);
 				$cookie_jar->extract_cookies($response);
 			}
 	
@@ -216,8 +202,7 @@ sub download_folder {
 		
 			print "Confirmed as a adult\n" if $VERBOSE;
 		} else {
-			print STDERR "This is a adult group exiting\n" if $VERBOSE;
-			exit;
+			terminate("This is a adult group exiting");
 		}
 	}
 	
@@ -234,23 +219,17 @@ sub download_folder {
 				download_folder("$sub_folder/$file_name");
 				next;
 			}
-			print "\t$sub_folder/$file_name .." if $VERBOSE;
+			print "$group $sub_folder/$file_name\n" if $VERBOSE;
 	
 			$request = GET $file_url;
 			$response = $ua->simple_request($request);
-			if ($response->is_error) {
-				print STDERR "\n\t[$file_url] " . $response->as_string . "\n" if $VERBOSE;
-				exit;
-			}
+			terminate("\n\t[$file_url] " . $response->as_string) if ($response->is_error);
 			while ( $response->is_redirect ) {
 				$cookie_jar->extract_cookies($response);
 				$url = GetRedirectUrl($response);
 				$request = GET $url;
 				$response = $ua->simple_request($request);
-				if ($response->is_error) {
-					print STDERR "\n\t[$url] " . $response->as_string . "\n" if $VERBOSE;
-					exit;
-				}
+				terminate("\n\t[$url] " . $response->as_string) if ($response->is_error);
 			}
 			$cookie_jar->extract_cookies($response);
 			$content = $response->content;
@@ -258,10 +237,7 @@ sub download_folder {
 			if ($content =~ /Continue to message/s) {
 				$request = GET $file_url;
 				$response = $ua->simple_request($request);
-				if ($response->is_error) {
-					print STDERR "\n\t[$file_url] " . $response->as_string . "\n" if $VERBOSE;
-					exit;
-				}
+				terminate("\n\t[$file_url] " . $response->as_string) if ($response->is_error);
 				$content = $response->content;
 			}
 			$cookie_jar->extract_cookies($response);
@@ -276,7 +252,6 @@ sub download_folder {
 			binmode(IFD);
 			print IFD $content;
 			close IFD;
-			print ".. done\n" if $VERBOSE;
 		}
 		
 		$cookie_jar->save if $COOKIE_SAVE;
@@ -297,7 +272,7 @@ sub terminate {
 }
 
 
-sub GetRedirectUrl($) {
+sub GetRedirectUrl {
 	my ($response) = @_;
 	my $url = $response->header('Location') || return undef;
 
