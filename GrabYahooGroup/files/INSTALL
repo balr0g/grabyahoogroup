@@ -6,6 +6,7 @@ HTTP::Cookies
 LWP::UserAgent
 LWP::Simple
 HTML::Entities
+Term::ReadKey
 
 CPAN module installation being out of the scope of this document I would
 recommend you visit http://www.cpan.org to know more.
