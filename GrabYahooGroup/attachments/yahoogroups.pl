@@ -189,6 +189,8 @@ eval {
 	$end_msgid = $e unless $end_msgid;
 	die "End message id :$end_msgid should be greater than begin message id : $begin_msgid\n" if ($end_msgid < $begin_msgid);
 
+	print "Processing messages $begin_msgid to $end_msgid\n" if $VERBOSE;
+
 	foreach my $messageid ($begin_msgid..$end_msgid) {
 		if (-d "$group/$messageid") {
 			next if ($REFRESH and not -f "$group/$messageid/.working");
