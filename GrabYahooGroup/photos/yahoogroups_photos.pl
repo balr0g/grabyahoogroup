@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/photos/yahoogroups_photos.pl,v 1.3 2004-08-31 12:39:57 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/photos/yahoogroups_photos.pl,v 1.4 2004-12-20 11:33:10 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -14,7 +14,7 @@ sub GetRedirectUrl($);
 
 # By default works in verbose mode unless VERBOSE=0 via environment variable for cron job.
 my $VERBOSE = 1;
-$VERBOSE = $ENV{'VERBOSE'} if $ENV{'VERBOSE'};
+$VERBOSE = $ENV{'VERBOSE'} if defined $ENV{'VERBOSE'};
 
 my $SAVEALL = 0; # Force download every file even if the file exists locally.
 my $REFRESH = 1; # Download only those messages which dont already exist.

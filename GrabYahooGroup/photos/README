@@ -12,8 +12,8 @@ it downloads. Inside this folder the complete hierarchy will be replicated as
 present on Yahoo.
 
 By default the tool will run in verbose mode assuming the user wants to run it
-in batch mode. Set a environment variable DEBUG to a true value to run in
-verbose mode.
+in batch mode. Set a environment variable VERBOSE to a false value to run in
+quite mode.
 
 # Mandatory : group to download
 
