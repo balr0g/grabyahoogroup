@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.1.1.4 2005-04-04 09:33:38 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.1.1.5 2005-04-07 18:12:08 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
@@ -270,6 +270,10 @@ sub new {
 	my $cookie_jar = HTTP::Cookies->new( 'file' => $COOKIE_FILE );
 	$ua->cookie_jar($cookie_jar);
 
+	if ($COOKIE_LOAD and -f $COOKIE_FILE) {
+		$cookie_jar->load();
+	}
+
 	$self->{'UA'} = $ua;
 
 	$self->{'GROUP_URL'} = 'groups.yahoo.com';
@@ -284,7 +288,7 @@ sub set_group_url {
 
 	my $result = $self->retrieve("/group/$group/");
 
-	($self->{'GROUP_URL'}) = $result->{'LAST_URL'} =~ /http:\/\/(.+?groups\.yahoo\.com)/;
+	($self->{'GROUP_DOMMAIN'}) = $result->{'REQUEST'}->uri() =~ /http:\/\/(.+?groups\.yahoo\.com)/;
 }
 
 sub retrieve {
@@ -292,7 +296,33 @@ sub retrieve {
 
 	my ($url) = @_;
 
-	my $result->{'LAST_URL'} = $url;
+	my $group_dommain = $self->{'GROUP_DOMMAIN'};
+	my $ua = $self->{'UA'};
+
+	my $request = GET "$group_dommain$url";
+	my $response = $ua->simple_request($request);
+
+	if ($response->is_error) {
+		print STDERR "[$group_dommain$url] " . $response->as_string . "\n" if $VERBOSE;
+		exit;
+	}
+
+	while ( $response->is_redirect ) {
+		$cookie_jar->extract_cookies($response);
+		$url = GetRedirectUrl($response);
+		$result->{'LAST_URL'} = $url;
+		$request = GET $url;
+		$response = $ua->simple_request($request);
+		if ($response->is_error) {
+			print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
+			exit;
+		}
+	}
+	$cookie_jar->extract_cookies($response);
+
+	my $result;
+	$result->{'REQUEST'}  = $request;
+	$result->{'RESPONSE'} = $response;
 
 	return $result;
 }
