@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.1.1.5 2005-04-07 18:12:08 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.1.1.6 2005-04-13 18:00:49 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
@@ -131,6 +131,8 @@ sub new {
 
 	my $module = $MODULE->{$active_module}->{'SUB'};
 	my $self = &$module;
+	
+	return $self if ref($self) eq 'SCALAR';
 
 	my $client = $self->{'CLIENT'};
 
@@ -153,8 +155,22 @@ sub new {
 
 	$self->{'CLIENT'} = $client;
 
-	$client->retrieve("/group/$group/message");
+	my $result = $client->retrieve("/group/$group/message/1");
+	
+	my $content = $result->{'RESPONSE'}->content();
 
+	return 'Not a member of the group : $group' if $content =~ /You are not a member of the group <b>$group/;
+	
+	my ($b, $e) = $content =~ /(\d+)-\d+ of (\d+) /;
+	
+	return q{Couldn't retrieve message begin page};
+	
+	$BEGIN_MSGID = $b if((!defined $BEGIN_MSGID) or ($b > $BEGIN_MSGID));
+	$END_MSGID = $e if ((!defined $END_MSGID) or ($e < $END_MSGID));
+	
+	$self->{'BEGIN_MSGID'} = $BEGIN_MSGID;
+	$self->{'END_MSGID'} = $END_MSGID;
+	
 	return bless $self;
 }
 
@@ -176,9 +192,13 @@ sub new {
 
 	$self->{'CLIENT'} = $client;
 
-	$client->retrieve("/group/$group/message");
+	my $result = $client->retrieve("/group/$group/files");
+	
+	my $content = $result->{'RESPONSE'}->content();
 
-	return bless $self;
+	return bless $self unless $content =~ /You are not a member of the group <b>$group/;
+	
+	return 'Not a member of this group';
 }
 
 sub process {
@@ -198,9 +218,13 @@ sub new {
 
 	$self->{'CLIENT'} = $client;
 
-	$client->retrieve("/group/$group/message");
+	my $result = $client->retrieve("/group/$group/files");
 
-	return bless $self;
+	my $content = $result->{'RESPONSE'}->content();
+
+	return bless $self unless $content =~ /You are not a member of the group <b>$group/;
+	
+	return 'Not a member of this group';
 }
 
 sub process {
@@ -220,9 +244,13 @@ sub new {
 
 	$self->{'CLIENT'} = $client;
 
-	$client->retrieve("/group/$group/message");
+	my $result = $client->retrieve("/group/$group/members");
 
-	return bless $self;
+	my $content = $result->{'RESPONSE'}->content();
+
+	return bless $self unless $content =~ /You are not a member of the group <b>$group/;
+	
+	return 'Not a member of this group';
 }
 
 sub process {
@@ -288,23 +316,42 @@ sub set_group_url {
 
 	my $result = $self->retrieve("/group/$group/");
 
-	($self->{'GROUP_DOMMAIN'}) = $result->{'REQUEST'}->uri() =~ /http:\/\/(.+?groups\.yahoo\.com)/;
+	($self->{'GROUP_DOMAIN'}) = $result->{'REQUEST'}->uri() =~ /http:\/\/(.+?groups\.yahoo\.com)/;
 }
 
 sub retrieve {
 	my $self = shift;
 
 	my ($url) = @_;
+	my $result;
 
-	my $group_dommain = $self->{'GROUP_DOMMAIN'};
+	my $group_domain = $self->{'GROUP_DOMAIN'};
 	my $ua = $self->{'UA'};
+	my $HUMAN_WAIT = $self->{'HUMAN_WAIT'};
+	my $HUMAN_REFLEX = $self->{'HUMAN_REFLEX'};
+	my $HUMAN_BEHAVIOR = $self->{'HUMAN_BEHAVIOR'};
+	
+	my $cookie_jar = $ua->cookie_jar();
+	
+	my $VERBOSE = $self->{'VERBOSE'};
+	
+	sleep($HUMAN_WAIT + int(rand($HUMAN_REFLEX))) if $HUMAN_BEHAVIOR;
 
-	my $request = GET "$group_dommain$url";
+	my $request = GET "$group_domain$url";
 	my $response = $ua->simple_request($request);
 
 	if ($response->is_error) {
-		print STDERR "[$group_dommain$url] " . $response->as_string . "\n" if $VERBOSE;
+		print STDERR "[$group_domain$url] " . $response->as_string . "\n" if $VERBOSE;
 		exit;
+	}
+	
+	$result = $self->login_adult();
+	
+	if ((ref $result) eq 'HASH') {
+		$request = $result->{'REQUEST'};
+		$response = $result->{'RESPONSE'};
+	} elsif ((defined $result) and ((ref $result) eq undef)) {
+		return $result;
 	}
 
 	while ( $response->is_redirect ) {
@@ -317,14 +364,122 @@ sub retrieve {
 			print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
 			exit;
 		}
+		$result = $self->login_adult($response);
+	
+		if ((ref $result) eq 'HASH') {
+			$request = $result->{'REQUEST'};
+			$response = $result->{'RESPONSE'};
+		} elsif ((defined $result) and ((ref $result) eq undef)) {
+			return $result;
+		}
 	}
 	$cookie_jar->extract_cookies($response);
 
-	my $result;
 	$result->{'REQUEST'}  = $request;
 	$result->{'RESPONSE'} = $response;
 
 	return $result;
 }
+
+
+sub login_adult {
+	my $self = shift;
+	
+	my ($response) = @_;
+	
+	my $result;
+	
+	my $ua = $self->{'UA'};
+	my $VERBOSE = $self->{'VERBOSE'};
+	my $username = $self->{'USERNAME'};
+	my $password = $self->{'PASSWORD'};
+	my $BATCH_MODE = $self->{'BATCH_MODE'};
+	my $group_domain = $self->{'GROUP_DOMAIN'};
+	my $HUMAN_WAIT = $self->{'HUMAN_WAIT'};
+	my $HUMAN_REFLEX = $self->{'HUMAN_REFLEX'};
+	my $HUMAN_BEHAVIOR = $self->{'HUMAN_BEHAVIOR'};
+	
+	sleep($HUMAN_WAIT + int(rand($HUMAN_REFLEX))) if $HUMAN_BEHAVIOR;
+	
+	my $content = $response->content();
+	
+	if ($content =~ /<form method=post action="https:\/\/login.yahoo.com\/config\/login\?"/) {
+		my ($u) = $content =~ /<input type=hidden name=.u value="(.+?)" >/s;
+		my ($challenge) = $content =~ /<input type=hidden name=.challenge value="(.+?)" >/s;
+		my ($done) = $content =~ /<input type=hidden name=.done value="(.+?)">/;
+	
+		unless ($username) {
+			my ($slogin) = $content =~ /<input type=hidden name=".slogin" value="(.+?)" >/;
+			$username = $slogin if $slogin;
+		}
+
+		unless ($BATCH_MODE) {
+			unless ($username) {
+				print "Enter username : ";
+				$username = <STDIN>;
+				chomp $username;
+			}
+		
+			unless ($password) {
+				use Term::ReadKey;
+				ReadMode('noecho');
+				print "Enter password : ";
+				$password = ReadLine(0);
+				ReadMode('restore');
+				chomp $password;
+			print "\n";
+			}
+		}
+		
+		return 'No username provided' unless $username;
+	
+		my $request = POST 'http://login.yahoo.com/config/login?',
+			[
+			 '.tries' => '1',
+			 '.src'   => 'ygrp',
+			 '.md5'   => '',
+			 '.hash'  => '',
+			 '.js'    => '',
+			 '.last'  => '',
+			 'promo'  => '',
+			 '.intl'  => 'us',
+			 '.bypass' => '',
+			 '.partner' => '',
+			 '.u'     => $u,
+			 '.v'     => 0,
+			 '.challenge' => $challenge,
+			 '.yplus' => '',
+			 '.emailCode' => '',
+			 'pkg'    => '',
+			 'stepid' => '',
+			 '.ev'    => '',
+			 'hasMsgr' => 0,
+			 '.chkP'  => 'Y',
+			 '.done'  => $done,
+			 'login'  => $username,
+			 'passwd' => $password,
+			 '.persistent' => 'y',
+			 '.save'  => 'Sign In'
+			];
+		
+		$request->content_type('application/x-www-form-urlencoded');
+		$request->header('Accept' => '*/*');
+		$request->header('Allowed' => 'GET HEAD PUT');
+		$response = $ua->simple_request($request);
+		if ($response->is_error) {
+			print STDERR "[http://login.yahoo.com/config/login] " . $response->as_string . "\n" if $VERBOSE;
+			exit;
+		}
+		
+		$result->{'REQUEST'} = $request;
+		$result->{'RESPONSE'} = $response;
+		
+		return $result;
+	}
+	
+	
+}
+
+
 
 1;
