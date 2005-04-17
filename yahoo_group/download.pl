@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.1.1.6 2005-04-13 18:00:49 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.1.1.7 2005-04-17 07:43:51 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
@@ -132,7 +132,7 @@ sub new {
 	my $module = $MODULE->{$active_module}->{'SUB'};
 	my $self = &$module;
 	
-	return $self if ref($self) eq 'SCALAR';
+	return $self if ref($self) eq undef;
 
 	my $client = $self->{'CLIENT'};
 
@@ -151,13 +151,23 @@ sub new {
 
 	my ($group, $VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE, $BEGIN_MSGID, $END_MSGID) = @_;
 
+	$self->{'GROUP'} = $group;
+	
 	my $client = new GrabYahoo::Client($VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE);
 
 	$self->{'CLIENT'} = $client;
 
 	my $result = $client->retrieve("/group/$group/message/1");
 	
-	my $content = $result->{'RESPONSE'}->content();
+	my $response;
+	
+	if ((ref $result) eq 'HASH') {
+		$response = $result->{'RESPONSE'};
+	} elsif (defined $result) {
+		return $result;
+	}
+
+	my $content = $response->content();
 
 	return 'Not a member of the group : $group' if $content =~ /You are not a member of the group <b>$group/;
 	
@@ -176,6 +186,26 @@ sub new {
 
 sub process {
 	my $self = shift;
+	
+	my $VERBOSE = $self->{'VERBOSE'};
+	my $BEGIN_MSGID = $self->{'BEGIN_MSGID'};
+	my $END_MSGID = $self->{'END_MSGID'};
+	my $group = $self->{'GROUP'};
+	
+	print "Processing messages between $BEGIN_MSGID and $END_MSGID\n" if $VERBOSE;
+	
+	foreach my $messageid ($BEGIN_MSGID..$END_MSGID) {
+		next if $REFRESH and -f "$group/$messageid";
+		$self->retrieve("/group/$group/message/$messageid?source=1&unwrap=1");
+		my $response;	
+		if ((ref $result) eq 'HASH') {
+			$response = $result->{'RESPONSE'};
+		} elsif (defined $result) {
+			return $result;
+		}
+		my $content = $response->content();
+		
+	}
 }
 
 1;
@@ -188,13 +218,23 @@ sub new {
 
 	my ($group, $VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE) = @_;
 
+	$self->{'GROUP'} = $group;
+	
 	my $client = new GrabYahoo::Client($VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE);
 
 	$self->{'CLIENT'} = $client;
 
 	my $result = $client->retrieve("/group/$group/files");
 	
-	my $content = $result->{'RESPONSE'}->content();
+	my $response;
+	
+	if ((ref $result) eq 'HASH') {
+		$response = $result->{'RESPONSE'};
+	} elsif (defined $result) {
+		return $result;
+	}
+
+	my $content = $response->content();
 
 	return bless $self unless $content =~ /You are not a member of the group <b>$group/;
 	
@@ -214,13 +254,23 @@ sub new {
 
 	my ($group, $VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE) = @_;
 
+	$self->{'GROUP'} = $group;
+	
 	my $client = new GrabYahoo::Client($VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE);
 
 	$self->{'CLIENT'} = $client;
 
 	my $result = $client->retrieve("/group/$group/files");
+	
+	my $response;
+	
+	if ((ref $result) eq 'HASH') {
+		$response = $result->{'RESPONSE'};
+	} elsif (defined $result) {
+		return $result;
+	}
 
-	my $content = $result->{'RESPONSE'}->content();
+	my $content = $response->content();
 
 	return bless $self unless $content =~ /You are not a member of the group <b>$group/;
 	
@@ -240,13 +290,23 @@ sub new {
 
 	my ($group, $VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE) = @_;
 
+	$self->{'GROUP'} = $group;
+	
 	my $client = new GrabYahoo::Client($VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE);
 
 	$self->{'CLIENT'} = $client;
 
 	my $result = $client->retrieve("/group/$group/members");
+	
+	my $response;
+	
+	if ((ref $result) eq 'HASH') {
+		$response = $result->{'RESPONSE'};
+	} elsif (defined $result) {
+		return $result;
+	}
 
-	my $content = $result->{'RESPONSE'}->content();
+	my $content = $response->content();
 
 	return bless $self unless $content =~ /You are not a member of the group <b>$group/;
 	
@@ -315,6 +375,10 @@ sub set_group_url {
 	my ($group) = @_;
 
 	my $result = $self->retrieve("/group/$group/");
+	
+	return unless defined $result;
+	
+	return if (ref $result) ne 'HASH';
 
 	($self->{'GROUP_DOMAIN'}) = $result->{'REQUEST'}->uri() =~ /http:\/\/(.+?groups\.yahoo\.com)/;
 }
@@ -340,17 +404,14 @@ sub retrieve {
 	my $request = GET "$group_domain$url";
 	my $response = $ua->simple_request($request);
 
-	if ($response->is_error) {
-		print STDERR "[$group_domain$url] " . $response->as_string . "\n" if $VERBOSE;
-		exit;
-	}
+	return "[$group_domain$url] " . $response->as_string . if $response->is_error;
 	
 	$result = $self->login_adult();
 	
 	if ((ref $result) eq 'HASH') {
 		$request = $result->{'REQUEST'};
 		$response = $result->{'RESPONSE'};
-	} elsif ((defined $result) and ((ref $result) eq undef)) {
+	} elsif ((defined $result) and ((ref $result) ne 'HASH')) {
 		return $result;
 	}
 
@@ -360,16 +421,14 @@ sub retrieve {
 		$result->{'LAST_URL'} = $url;
 		$request = GET $url;
 		$response = $ua->simple_request($request);
-		if ($response->is_error) {
-			print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
-			exit;
-		}
+		return "[$url] " . $response->as_string if $response->is_error;
+		
 		$result = $self->login_adult($response);
 	
 		if ((ref $result) eq 'HASH') {
 			$request = $result->{'REQUEST'};
 			$response = $result->{'RESPONSE'};
-		} elsif ((defined $result) and ((ref $result) eq undef)) {
+		} elsif (defined $result) {
 			return $result;
 		}
 	}
@@ -398,6 +457,7 @@ sub login_adult {
 	my $HUMAN_WAIT = $self->{'HUMAN_WAIT'};
 	my $HUMAN_REFLEX = $self->{'HUMAN_REFLEX'};
 	my $HUMAN_BEHAVIOR = $self->{'HUMAN_BEHAVIOR'};
+	my $GETADULT = $self->{'GETADULT'};
 	
 	sleep($HUMAN_WAIT + int(rand($HUMAN_REFLEX))) if $HUMAN_BEHAVIOR;
 	
@@ -466,10 +526,7 @@ sub login_adult {
 		$request->header('Accept' => '*/*');
 		$request->header('Allowed' => 'GET HEAD PUT');
 		$response = $ua->simple_request($request);
-		if ($response->is_error) {
-			print STDERR "[http://login.yahoo.com/config/login] " . $response->as_string . "\n" if $VERBOSE;
-			exit;
-		}
+		return "[http://login.yahoo.com/config/login] " . $response->as_string if $response->is_error;
 		
 		$result->{'REQUEST'} = $request;
 		$result->{'RESPONSE'} = $response;
@@ -477,7 +534,24 @@ sub login_adult {
 		return $result;
 	}
 	
-	
+	if ($content =~ /<form action="\/adultconf" method="post">/) {
+		return 'Adult Group confirmation required' unless $GETADULT;
+		my ($dest) = $content =~ /<input type="hidden" name="dest" value="(.+?)">/;
+		$request = POST 'http://groups.yahoo.com/adultconf',
+				[ 'dest'  => $dest,
+				  'accept' => 'I Accept'
+				];
+		$request->content_type('application/x-www-form-urlencoded');
+		$request->header('Accept' => '*/*');
+		$request->header('Allowed' => 'GET HEAD');
+		my $response = $ua->simple_request($request);
+		return "[http://groups.yahoo.com/adultconf] " . $response->as_string if $response->is_error;
+
+		$result->{'REQUEST'} = $request;
+		$result->{'RESPONSE'} = $response;
+		
+		return $result;		
+	}
 }
 
 
