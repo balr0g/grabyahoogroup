@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.5 2004-12-20 11:29:18 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.6 2005-05-12 17:43:51 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -94,7 +94,7 @@ sub download_folder {
 	my $u;
 	my $challenge;
 	
-	if ($content =~ /Sign in with your ID and password to continue/ or $content =~ /Verify your Yahoo! password to continue/) {
+	if ($content =~ /Sign in to Yahoo/ or $content =~ /Sign in with your ID and password to continue/ or $content =~ /Verify your Yahoo! password to continue/) {
 		($login_rand) = $content =~ /<form method=post action="https:\/\/login.yahoo.com\/config\/login\?(.+?)"/s;
 		($u) = $content =~ /<input type=hidden name=".u" value="(.+?)" >/s;
 		($challenge) = $content =~ /<input type=hidden name=".challenge" value="(.+?)" >/s;
@@ -211,7 +211,7 @@ sub download_folder {
 		terminate("Yahoo error : nonexistant group") if $content =~ /There is no group called /;
 		terminate("Yahoo error : database unavailable") if $content =~ /The database is unavailable at the moment/;
 		my ($cells) = $content =~ /<!-- start content include -->\s+(.+?)\s+<!-- end content include -->/s;
-		while ($cells =~ /<tr valign=top.+?<a href="(.+?)">(.+?)<\/a>\s+<br>.+?<\/tr>/sg) {
+		while ($cells =~ /<tr>.+?<span class="title">\s+<a href="(.+?)">(.+?)<\/a>\s+<\/span>.+?<\/tr>/sg) {
 			my $file_url = $1;
 			my $file_name = $2;
 			next if -f "$group$sub_folder/$file_name";
