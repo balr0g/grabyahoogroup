@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/members/yahoogroups_members.pl,v 1.2 2004-12-20 11:31:44 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/members/yahoogroups_members.pl,v 1.3 2005-05-23 22:10:42 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -60,10 +60,10 @@ download_members();
 
 sub download_members {
 
-	$request = GET "http://groups.yahoo.com/group/$group/members";
+	$request = GET "http://groups.yahoo.com/group/$group/members?start=0&xm=1&m=s&group=sub";
 	$response = $ua->simple_request($request);
 	if ($response->is_error) {
-		print STDERR "[http://groups.yahoo.com/group/$group/members] " . $response->as_string . "\n" if $VERBOSE;
+		print STDERR "[http://groups.yahoo.com/group/$group/members?start=0&xm=1&m=s&group=sub] " . $response->as_string . "\n" if $VERBOSE;
 		exit;
 	}
 	
@@ -85,7 +85,7 @@ sub download_members {
 	my $u;
 	my $challenge;
 	
-	if ($content =~ /Sign in with your ID and password to continue/ or $content =~ /Verify your Yahoo! password to continue/) {
+	if ($content =~ /Sign in to Yahoo/ or $content =~ /Sign in with your ID and password to continue/ or $content =~ /Verify your Yahoo! password to continue/) {
 		($login_rand) = $content =~ /<form method=post action="https:\/\/login.yahoo.com\/config\/login\?(.+?)"/s;
 		($u) = $content =~ /<input type=hidden name=".u" value="(.+?)" >/s;
 		($challenge) = $content =~ /<input type=hidden name=".challenge" value="(.+?)" >/s;
@@ -133,7 +133,7 @@ sub download_members {
 			 '.ev'    => '',
 			 'hasMsgr' => 0,
 			 '.chkP'  => 'Y',
-			 '.done'  => "http://groups.yahoo.com/group/$group/members",
+			 '.done'  => "http://groups.yahoo.com/group/$group/members?start=0&xm=1&m=s&group=sub",
 			 'login'  => $username,
 			 'passwd' => $password,
 			 '.persistent' => 'y',
@@ -164,7 +164,7 @@ sub download_members {
 	
 		terminate("Couldn't log in $username") if ( !$response->is_success );
 	
-		terminate("Wrong password entered for $username") if ( $content =~ /Invalid Password/ );
+		terminate("Wrong password entered for $username") if ( $content =~ /Invalid ID or password/ );
 	
 		terminate("Yahoo user $username does not exist") if ( $content =~ /ID does not exist/ );
 	
@@ -176,7 +176,7 @@ sub download_members {
 			$request = POST 'http://groups.yahoo.com/adultconf',
 				[
 				 'ref' => '',
-				 'dest'  => "/group/$group/members",
+				 'dest'  => "/group/$group/members?start=0&xm=1&m=s&group=sub",
 				 'accept' => 'I Accept'
 				];
 		
@@ -217,43 +217,39 @@ sub download_members {
 		terminate("Yahoo error : database unavailable") if $content =~ /The database is unavailable at the moment/;
 		while (1) {
 			my ($cells) = $content =~ /<!-- start content include -->\s+(.+?)\s+<!-- end content include -->/s;
-			while ($cells =~ /<tr .*?>\s+<td nowrap>\s+(.+?)\s+<td nowrap>\s+<a href="\/group\/$group\/post\?postID=(.+?)">(.+?)<\/a> <br>(.+?) <\/td>\s+<td nowrap align=center>\s+(\d+\/\d+\/\d{4}) <\/td>/sg) {
-				my $profile = $1;
-				my $post_id = $2;
-				my $partial_email = $3;
-				my $location = $4;
-				my $join_date = $5;
+			while ($cells =~ /<td class="info">(.+?)<\/td>\s<td class="yid selected ygrp-nowrap">\s(.+?)\s<\/td>\s<td class="email ygrp-nowrap">\s(.+?)\s<\/td>\s<td class="date ygrp-nowrap">\s(.+?)\s<\/td>/sg) {
+				my $member_block = $1;
+				my $yahoo_id = $2;
+				my $email_id = $3;
+				my $join_date = $4;
 
-				$location = '' if $location eq '&nbsp;';
-
-				my $yahoo_id = '';
-				my $name = '';
-				my $asl = '';
-				my $age = '';
-				my $sex = '';
-
-				my ($yahoo_profile, $name_asl) = $profile =~ /(.+?)\s+<br>(.+?) <\/td>/;
-
-				unless ($yahoo_profile =~ /Not Available/) {
-					($yahoo_id) = $yahoo_profile =~ /<a href="http:.+?">(.+?)<\/a>/;
+				my $member = '';
+				if ($member_block =~ /<span class="name">\s(.+?)\s<\/span>/) {
+					$member = $1;
+					$member =~ s/<.+?>//g;
+					$member =~ s/^ //;
 				}
 
-				unless ($name_asl =~ /nbsp/) {
-					($asl) = $name_asl =~ / \((.+?)\)/;
-					$name_asl =~ s/ \(.+?\)//;
-					$name = $name_asl;
+				my $online = '';
+				if ($member_block =~ /<span class="ygrp-nowrap">.+?<img src=.+?alt="(.+?)"/s) {
+					$online = $1;
+					$online = 'Online' if $online =~ /Online/;
+					$online = 'Unknown' if $online =~ /Send/;
 				}
 
-				if ($asl) {
-					$age = $1 if $asl =~ /(\d+)/;
-					$sex = $1 if $asl =~ /([MF])/;
-				}
+				$yahoo_id =~ s/<.+?>//g;
+				$yahoo_id =~ s/\s+//g;
 
-				print "$yahoo_id\t$name\t$age\t$sex\t$partial_email\t$location\t$join_date\n";
+				$email_id =~ s/<.+?>//g;
+				$email_id =~ s/\s+//g;
+
+				$join_date =~ s/&nbsp;/ /g;
+
+				print "$member\t$online\t$yahoo_id\t$email_id\t$join_date\n";
 			}
-			last if $content =~ /<font color="#666666">Next<\/font>/;
+			last if $content =~ /<span class="inactive">Next&nbsp;&gt;<\/span>/;
 
-			my ($next_start) = $content =~ /<a href="\/group\/$group\/members\?start=(\d+)&.+?">Next<\/a>/;
+			my ($next_start) = $content =~ /<a href="\/group\/$group\/members\?start=(\d+)&.+?">Next&nbsp;&gt;<\/a>/;
 			$request = GET "http://groups.yahoo.com/group/$group/members?start=$next_start";
 			$response = $ua->simple_request($request);
 			if ($response->is_error) {
