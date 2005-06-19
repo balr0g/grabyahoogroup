@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.10 2005-03-20 20:35:50 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.11 2005-06-19 05:25:39 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -123,7 +123,7 @@ my $login_rand;
 my $u;
 my $challenge;
 
-if ($content =~ /Sign in with your ID and password to continue/ or $content =~ /To access\s+Yahoo! Groups...<\/span><br>\s+<strong>Sign in to Yahoo/ or $content =~ /Verify your Yahoo! password to continue/ or $content =~ /sign in<\/a> now/) {
+if (!(-f $Cookie_file) or $content =~ /Sign in to Yahoo/ or $content =~ /Sign in with your ID and password to continue/ or $content =~ /To access\s+Yahoo! Groups...<\/span><br>\s+<strong>Sign in to Yahoo/ or $content =~ /Verify your Yahoo! password to continue/ or $content =~ /sign in<\/a> now/) {
 	($login_rand) = $content =~ /<form method=post action="https:\/\/login.yahoo.com\/config\/login\?(.+?)"/s;
 	($u) = $content =~ /<input type=hidden name=".u" value="(.+?)" >/s;
 	($challenge) = $content =~ /<input type=hidden name=".challenge" value="(.+?)" >/s;
