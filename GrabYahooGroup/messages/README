@@ -15,8 +15,12 @@ The program will create a directory in the current directory for every group
 it downloads. Each message id will be a separate file in that folder.
 
 By default the tool will run in verbose mode assuming the user wants to run it
-in batch mode. Set a environment variable VERBOSE to a true value to run in
-verbose mode.
+in batch mode. Set a environment variable VERBOSE to a false value to run in
+quite mode.
+
+[DOS/Windows Only] Run the script prefixing "perl -T" since ActivePerl doesnt seem
+to know how to do it automatically. In any case the script will complain if you
+dont do so.
 
 # Mandatory : group to download
 # Optional : begining message id and ending message id.
@@ -25,6 +29,8 @@ verbose mode.
 
 To run : yahoo2maildir.pl <group name> [<begin message id> [<end message id>]]
 
-Quite mode : env VERBOSE=0 yahoo2maildir.pl <group name> [<begin message id> [<end message id>]]
+Quite mode : 
+env VERBOSE=0 yahoo2maildir.pl <group name> [<begin message id> [<end message id>]]
 
-Quite mode with unicode support turned off : env VERBOSE=0 LANG=en_US yahoo2maildir.pl <group name> [<begin message id> [<end message id>]]
+Quite mode with unicode support turned off : 
+env VERBOSE=0 LANG=en_US yahoo2maildir.pl <group name> [<begin message id> [<end message id>]]
