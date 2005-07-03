@@ -22,6 +22,10 @@ quite mode.
 to know how to do it automatically. In any case the script will complain if you
 dont do so.
 
+To get a MBOX formated file run the mboxify.pl script with parameters Folder name and
+destination mbox File Name
+
+
 # Mandatory : group to download
 # Optional : begining message id and ending message id.
 
