@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.11 2005-06-19 05:25:39 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.12 2005-07-03 22:29:59 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -41,6 +41,8 @@ my $HTTP_PROXY_URL = ''; # Proxy server if any http://hostname:port/
 my $TIMEOUT = 10; # Connection timeout changed from default 3 min for slow connection/server
 my $USER_AGENT = 'GrabYahoo/1.00'; # Changing this value is probably unethical at the least and possible illegal at the worst
 my $cycle = 1; # Every block cycle
+
+my $sleep_duration = 0;
 
 unless ($HTTP_PROXY_URL) {
 	if ($ENV{'http_proxy'}) {
@@ -181,7 +183,9 @@ if (!(-f $Cookie_file) or $content =~ /Sign in to Yahoo/ or $content =~ /Sign in
 	$request->content_type('application/x-www-form-urlencoded');
 	$request->header('Accept' => '*/*');
 	$request->header('Allowed' => 'GET HEAD PUT');
-	sleep($HUMAN_WAIT + int(rand($HUMAN_REFLEX)));
+	$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
+	print STDERR "[Sleeping for $sleep_duration seconds] " if $VERBOSE;
+	sleep($sleep_duration);
 	$response = $ua->simple_request($request);
 	if ($response->is_error) {
 		print STDERR "[http://login.yahoo.com/config/login] " . $response->as_string . "\n" if $VERBOSE;
@@ -223,7 +227,9 @@ if (($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) or ($
 		$request->content_type('application/x-www-form-urlencoded');
 		$request->header('Accept' => '*/*');
 		$request->header('Allowed' => 'GET HEAD PUT');
-		sleep($HUMAN_WAIT + int(rand($HUMAN_REFLEX)));
+		$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
+		print STDERR "[Sleeping for $sleep_duration seconds] " if $VERBOSE;
+		sleep($sleep_duration);
 		$response = $ua->simple_request($request);
 		if ($response->is_error) {
 			print STDERR "[http://groups.yahoo.com/adultconf] " . $response->as_string . "\n" if $VERBOSE;
@@ -257,13 +263,9 @@ if ($content =~ /You are not a member of the group <b>$group/) {
 }
 
 eval {
-	my $b;
-	my $e;
-	unless ($end_msgid) {
-		$content = $response->content;
-		($b, $e) = $content =~ /(\d+)-\d+ of (\d+) /;
-		terminate("Couldn't get message count") unless $e;
-	}
+	$content = $response->content;
+	my ($b, $e) = $content =~ /(\d+)-\d+ of (\d+) /;
+	terminate("Couldn't get message count") unless $e;
 	$begin_msgid = $b unless $begin_msgid;
 	$end_msgid = $e unless $end_msgid;
 	terminate("End message id :$end_msgid should be greater than begin message id : $begin_msgid") if ($end_msgid < $begin_msgid);
@@ -281,7 +283,9 @@ eval {
 
 		$url = "http://groups.yahoo.com/group/$group/message/$messageid?source=1\&unwrap=1";
 		$request = GET $url;
-		sleep($HUMAN_WAIT + int(rand($HUMAN_REFLEX)));
+		$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
+		print STDERR "[Sleeping for $sleep_duration seconds] " if $VERBOSE;
+		sleep($sleep_duration);
 		$response = $ua->simple_request($request);
 		if ($response->is_error) {
 			print STDERR "[http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] " . $response->as_string . "\n" if $VERBOSE;
@@ -304,10 +308,14 @@ eval {
 		# Assuming we are being blocked - lets pause rather than get sacrificed
 		while ($content =~ /Unfortunately, we are unable to process your request at this time/i) {
 			print STDERR "[http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] Yahoo has blocked us ?\n" if $VERBOSE;
-			sleep(3600*$cycle);
+			$sleep_duration = 3600*$cycle;
+			print STDERR "[Sleeping for $sleep_duration seconds] " if $VERBOSE;
+			sleep($sleep_duration);
 			$url = "http://groups.yahoo.com/group/$group/message/$messageid?source=1\&unwrap=1";
 			$request = GET $url;
-			sleep($HUMAN_WAIT + int(rand($HUMAN_REFLEX)));
+			$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
+			print STDERR "[Sleeping for $sleep_duration seconds] " if $VERBOSE;
+			sleep($sleep_duration);
 			$response = $ua->simple_request($request);
 			if ($response->is_error) {
 				print STDERR "[http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] " . $response->as_string . "\n" if $VERBOSE;
