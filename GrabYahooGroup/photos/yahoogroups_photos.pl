@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/photos/yahoogroups_photos.pl,v 1.4 2004-12-20 11:33:10 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/photos/yahoogroups_photos.pl,v 1.5 2005-08-30 15:03:23 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -86,7 +86,7 @@ my $login_rand;
 my $u;
 my $challenge;
 
-if ($init_content =~ /Sign in with your ID and password to continue/ or $init_content =~ /Verify your Yahoo! password to continue/) {
+if ($cookie_jar->as_string eq '' or ($init_content =~ /Sign in with your ID and password to continue/ or $init_content =~ /Verify your Yahoo! password to continue/)) {
 	($login_rand) = $init_content =~ /<form method=post action="https:\/\/login.yahoo.com\/config\/login\?(.+?)"/s;
 	($u) = $init_content =~ /<input type=hidden name=".u" value="(.+?)" >/s;
 	($challenge) = $init_content =~ /<input type=hidden name=".challenge" value="(.+?)" >/s;
