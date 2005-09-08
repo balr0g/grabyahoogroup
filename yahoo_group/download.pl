@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.1.1.8 2005-04-22 17:45:24 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.2 2005-09-08 13:01:03 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
@@ -98,19 +98,19 @@ sub new {
 	}
 
 	my $COOKIE_FILE = "$group/yahoogroups.cookies";
+	
+	my $client = new GrabYahoo::Client($VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BLOCK_PERIOD, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE);
 
-
-
-	my $MODULE = { "MESSAGES" => {'SUB' => sub { my $module = new GrabYahoo::Messages($group, $VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BLOCK_PERIOD, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE, $BEGIN_MSGID, $END_MSGID);
+	my $MODULE = { "MESSAGES" => {'SUB' => sub { my $module = new GrabYahoo::Messages($group, $client, $BEGIN_MSGID, $END_MSGID);
 					return $module; },
 				      'ACTIVE' => $MESSAGES},
-		       "FILES"    => {'SUB' => sub { my $module = new GrabYahoo::Files($group, $VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BLOCK_PERIOD, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE);
+		       "FILES"    => {'SUB' => sub { my $module = new GrabYahoo::Files($group, $client);
 					return $module; },
 				      'ACTIVE' => $FILES},
-		       "PHOTOS"   => {'SUB' => sub { my $module = new GrabYahoo::Photos($group, $VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BLOCK_PERIOD, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE);
+		       "PHOTOS"   => {'SUB' => sub { my $module = new GrabYahoo::Photos($group, $client);
 					return $module; },
 				      'ACTIVE' => $PHOTOS},
-		       "MEMBERS"  => {'SUB' => sub { my $module = new GrabYahoo::Members($group, $VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BLOCK_PERIOD, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE);
+		       "MEMBERS"  => {'SUB' => sub { my $module = new GrabYahoo::Members($group, $client);
 					return $module; },
 				      'ACTIVE' => $MEMBERS}
 		  };
@@ -152,11 +152,9 @@ package GrabYahoo::Messages;
 sub new {
 	my $self = {};
 
-	my ($group, $VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BLOCK_PERIOD, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE, $BEGIN_MSGID, $END_MSGID) = @_;
+	my ($group, $client, $BEGIN_MSGID, $END_MSGID) = @_;
 
 	$self->{'GROUP'} = $group;
-	
-	my $client = new GrabYahoo::Client($VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BLOCK_PERIOD, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE);
 
 	$self->{'CLIENT'} = $client;
 
@@ -220,15 +218,13 @@ package GrabYahoo::Files;
 sub new {
 	my $self = {};
 
-	my ($group, $VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BLOCK_PERIOD, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE) = @_;
+	my ($group, $client) = @_;
 
 	$self->{'GROUP'} = $group;
-	
-	my $client = new GrabYahoo::Client($VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BLOCK_PERIOD, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE);
 
 	$self->{'CLIENT'} = $client;
 
-	my $result = $client->retrieve("/group/$group/files");
+	my $result = $client->retrieve("http://login.yahoo.com/config/login?.intl=us&.src=ygrp&.done=http%3a//groups.yahoo.com%2Fgroup%2F$group%2Ffiles");
 	
 	my $response;
 	
@@ -256,15 +252,13 @@ package GrabYahoo::Photos;
 sub new {
 	my $self = {};
 
-	my ($group, $VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BLOCK_PERIOD, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE) = @_;
+	my ($group, $client) = @_;
 
 	$self->{'GROUP'} = $group;
-	
-	my $client = new GrabYahoo::Client($VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BLOCK_PERIOD, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE);
 
 	$self->{'CLIENT'} = $client;
 
-	my $result = $client->retrieve("/group/$group/files");
+	my $result = $client->retrieve("http://login.yahoo.com/config/login?.intl=us&.src=ygrp&.done=http%3a//groups.yahoo.com%2Fgroup%2F$group%2Ffiles");
 	
 	my $response;
 	
@@ -292,15 +286,13 @@ package GrabYahoo::Members;
 sub new {
 	my $self = {};
 
-	my ($group, $VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BLOCK_PERIOD, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE) = @_;
+	my ($group, $client) = @_;
 
 	$self->{'GROUP'} = $group;
-	
-	my $client = new GrabYahoo::Client($VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BLOCK_PERIOD, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE);
 
 	$self->{'CLIENT'} = $client;
 
-	my $result = $client->retrieve("/group/$group/members");
+	my $result = $client->retrieve("http://login.yahoo.com/config/login?.intl=us&.src=ygrp&.done=http%3a//groups.yahoo.com%2Fgroup%2F$group%2Fmembers");
 	
 	my $response;
 	
@@ -412,6 +404,8 @@ sub retrieve {
 
 	return "[$group_domain$url] " . $response->as_string if $response->is_error;
 	
+	$self->{'CYCLE'} = 1;
+
 	$result = $self->holding_pages($request, $response);
 	
 	if ((ref $result) eq 'HASH') {
@@ -428,7 +422,9 @@ sub retrieve {
 		$response = $ua->simple_request($request);
 		$cookie_jar->extract_cookies($response);
 		return "[$url] " . $response->as_string if $response->is_error;
-		
+
+		$self->{'CYCLE'} = 1;
+
 		$result = $self->holding_pages($request, $response);
 	
 		if ((ref $result) eq 'HASH') {
@@ -564,7 +560,7 @@ sub holding_pages {
 	}
 
 	# Yahoo blocked for spamming
-	my $CYCLE = 1; # Blocking cycle currently running
+	my $CYCLE = $self->{'CYCLE'}; # Blocking cycle currently running
 
 	while($content =~ /Unfortunately, we are unable to process your request at this time/i) {
 		print STDERR "[$uri] Yahoo has blocked us, sleeping for " . $BLOCK_PERIOD*$CYCLE . " seconds\n" if $VERBOSE;
@@ -575,8 +571,12 @@ sub holding_pages {
 
 		$content = $response->content();
 
-		$CYCLE++;
+		$self->{'CYCLE'}++;
+
+		return;
 	}
+
+	$self->{'CYCLE'} = 0; # Reset blocking cycle currently running
 
 	$result->{'REQUEST'} = $request;
 	$result->{'RESPONSE'} = $response;
