@@ -12,7 +12,7 @@ verbose => default off - says what the script is doing
 getadult => default on - get details even from adult groups
 username => your yahoo userid
 password => yahoo password
-http_proxy => HTTP proxy in http://hostname:port/ format
+http_proxy => HTTP proxy in 'http://hostname:port/' format
 timeout => connection time out for HTTP requests
 user_agent => browser being used - Changing this value is probably unethical at
               the least and possible illegal at the worst
@@ -20,6 +20,6 @@ user_agent => browser being used - Changing this value is probably unethical at
 ------------------------
 [EXAMPLE]
 
-Normal run : ./yahoogroups_members.pl <group name>
+Normal run : ./yahoogroups_members.pl --username=[yahoo id] --password=[yahoo passwd] [group name] > [group]_members.xls
 
-Debug run : ./yahoogroups_members.pl --verbose=1 <group name>
+Debug run : ./yahoogroups_members.pl --verbose=1 [group name]
