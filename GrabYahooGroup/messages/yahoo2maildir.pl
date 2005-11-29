@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.12 2005-07-03 22:29:59 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.13 2005-11-29 17:43:50 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -80,7 +80,7 @@ terminate("End message id : $end_msgid should be greater than begin message id :
 my ($group) = $user_group =~ /^([\w_\-]+)$/;
 
 unless (-d $group or mkdir $group) {
-	print STDERR "$! : $group\n" if $VERBOSE;
+	print STDERR "[INFO] $! : $group\n" if $VERBOSE;
 }
 
 my $Cookie_file = "$group/yahoogroups.cookies";
@@ -89,7 +89,7 @@ my $ua = LWP::UserAgent->new;
 $ua->proxy('http', $HTTP_PROXY_URL) if $HTTP_PROXY_URL;
 $ua->agent($USER_AGENT);
 $ua->timeout($TIMEOUT*60);
-print "Setting timeout to : " . $ua->timeout() . "\n" if $VERBOSE;
+print STDERR "[INFO] Setting timeout to : " . $ua->timeout() . "\n" if $VERBOSE;
 my $cookie_jar = HTTP::Cookies->new( 'file' => $Cookie_file );
 $ua->cookie_jar($cookie_jar);
 my $request;
@@ -103,7 +103,7 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 $request = GET "http://groups.yahoo.com/group/$group/messages/1";
 $response = $ua->simple_request($request);
 if ($response->is_error) {
-	print STDERR "[http://groups.yahoo.com/group/$group/messages/1] " . $response->as_string . "\n" if $VERBOSE;
+	print STDERR "[ERR] [http://groups.yahoo.com/group/$group/messages/1] " . $response->as_string . "\n" if $VERBOSE;
 	exit;
 }
 
@@ -113,7 +113,7 @@ while ( $response->is_redirect ) {
 	$request = GET $url;
 	$response = $ua->simple_request($request);
 	if ($response->is_error) {
-		print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
+		print STDERR "[ERR] [$url] " . $response->as_string . "\n" if $VERBOSE;
 		exit;
 	}
 }
@@ -184,11 +184,11 @@ if (!(-f $Cookie_file) or $content =~ /Sign in to Yahoo/ or $content =~ /Sign in
 	$request->header('Accept' => '*/*');
 	$request->header('Allowed' => 'GET HEAD PUT');
 	$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-	print STDERR "[Sleeping for $sleep_duration seconds] " if $VERBOSE;
+	print STDERR "[INFO] [Sleeping for $sleep_duration seconds] " if $VERBOSE;
 	sleep($sleep_duration);
 	$response = $ua->simple_request($request);
 	if ($response->is_error) {
-		print STDERR "[http://login.yahoo.com/config/login] " . $response->as_string . "\n" if $VERBOSE;
+		print STDERR "[ERR] [http://login.yahoo.com/config/login] " . $response->as_string . "\n" if $VERBOSE;
 		exit;
 	}
 	while ( $response->is_redirect ) {
@@ -197,7 +197,7 @@ if (!(-f $Cookie_file) or $content =~ /Sign in to Yahoo/ or $content =~ /Sign in
 		$request = GET $url;
 		$response = $ua->simple_request($request);
 		if ($response->is_error) {
-			print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
+			print STDERR "[ERR] [$url] " . $response->as_string . "\n" if $VERBOSE;
 			exit;
 		}
 		$cookie_jar->extract_cookies($response);
@@ -211,7 +211,7 @@ if (!(-f $Cookie_file) or $content =~ /Sign in to Yahoo/ or $content =~ /Sign in
 
 	terminate("Yahoo user $username does not exist") if ( $content =~ /ID does not exist/ );
 
-	print "Successfully logged in as $username.\n" if $VERBOSE; 
+	print STDERR "[INFO] Successfully logged in as $username.\n" if $VERBOSE; 
 }
 
 
@@ -228,11 +228,11 @@ if (($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) or ($
 		$request->header('Accept' => '*/*');
 		$request->header('Allowed' => 'GET HEAD PUT');
 		$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-		print STDERR "[Sleeping for $sleep_duration seconds] " if $VERBOSE;
+		print STDERR "[INFO] [Sleeping for $sleep_duration seconds] " if $VERBOSE;
 		sleep($sleep_duration);
 		$response = $ua->simple_request($request);
 		if ($response->is_error) {
-			print STDERR "[http://groups.yahoo.com/adultconf] " . $response->as_string . "\n" if $VERBOSE;
+			print STDERR "[ERR] [http://groups.yahoo.com/adultconf] " . $response->as_string . "\n" if $VERBOSE;
 			exit;
 		}
 		$cookie_jar->extract_cookies($response);
@@ -242,7 +242,7 @@ if (($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) or ($
 			$request = GET $url;
 			$response = $ua->simple_request($request);
 			if ($response->is_error) {
-				print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
+				print STDERR "[ERR] [$url] " . $response->as_string . "\n" if $VERBOSE;
 				exit;
 			}
 			$cookie_jar->extract_cookies($response);
@@ -250,45 +250,31 @@ if (($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) or ($
 
 		$content = $response->content;
 	
-		print "Confirmed as a adult\n" if $VERBOSE;
+		print STDERR "[INFO] Confirmed as a adult\n" if $VERBOSE;
 	} else {
-		print STDERR "This is a adult group exiting\n" if $VERBOSE;
+		print STDERR "[ERR] This is a adult group exiting\n" if $VERBOSE;
 		exit;
 	}
 }
 
 if ($content =~ /You are not a member of the group <b>$group/) {
-	print STDERR "Not a member of the group $group\n";
+	print STDERR "[ERR] Not a member of the group $group\n";
 	exit;
 }
 
 eval {
 	$content = $response->content;
-	my ($b, $e) = $content =~ /(\d+)-\d+ of (\d+) /;
-	terminate("Couldn't get message count") unless $e;
-	$begin_msgid = $b unless $begin_msgid;
-	$end_msgid = $e unless $end_msgid;
-	terminate("End message id :$end_msgid should be greater than begin message id : $begin_msgid") if ($end_msgid < $begin_msgid);
-
-	if ($end_msgid > $e) {
-		print STDERR "End message id is greater than what is reported by Yahoo - adjusting value to $e\n";
-		$end_msgid = $e;
-	}
-
-	print "Processing messages between $begin_msgid and $end_msgid\n" if $VERBOSE;
-
-	foreach my $messageid ($begin_msgid..$end_msgid) {
-		next if $REFRESH and -f "$group/$messageid";
-		print "$messageid: " if $VERBOSE;
-
-		$url = "http://groups.yahoo.com/group/$group/message/$messageid?source=1\&unwrap=1";
-		$request = GET $url;
+	while ($content =~ /Unfortunately, we are unable to process your request at this time/i) {
+		print STDERR "[WARN] [" . $request->uri . "] Yahoo has blocked us ?\n" if $VERBOSE;
+		$sleep_duration = 3600*$cycle;
+		print STDERR "[INFO] [Sleeping for $sleep_duration seconds] " if $VERBOSE;
+		sleep($sleep_duration);
 		$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-		print STDERR "[Sleeping for $sleep_duration seconds] " if $VERBOSE;
+		print STDERR "[INFO] [Sleeping for $sleep_duration seconds] " if $VERBOSE;
 		sleep($sleep_duration);
 		$response = $ua->simple_request($request);
 		if ($response->is_error) {
-			print STDERR "[http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] " . $response->as_string . "\n" if $VERBOSE;
+			print STDERR "[ERR] [" . $request->uri . "]\n" . $response->as_string . "\n" if $VERBOSE;
 			exit;
 		}
 		$cookie_jar->extract_cookies($response);
@@ -297,7 +283,48 @@ eval {
 			$request = GET $url;
 			$response = $ua->simple_request($request);
 			if ($response->is_error) {
-				print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
+				print STDERR "[ERR] [$url] " . $response->as_string . "\n" if $VERBOSE;
+				exit;
+			}
+			$cookie_jar->extract_cookies($response);
+		}
+		$content = $response->content;
+		$cycle++;
+	}
+	my ($b, $e) = $content =~ /(\d+)-\d+ of (\d+) /;
+	terminate("Couldn't get message count") unless $e;
+	$begin_msgid = $b unless $begin_msgid;
+	$end_msgid = $e unless $end_msgid;
+	terminate("End message id :$end_msgid should be greater than begin message id : $begin_msgid") if ($end_msgid < $begin_msgid);
+
+	if ($end_msgid > $e) {
+		print STDERR "[WARN] End message id is greater than what is reported by Yahoo - adjusting value to $e\n";
+		$end_msgid = $e;
+	}
+
+	print STDERR "[INFO] Processing messages between $begin_msgid and $end_msgid\n" if $VERBOSE;
+
+	foreach my $messageid ($begin_msgid..$end_msgid) {
+		next if $REFRESH and -f "$group/$messageid";
+		print STDERR "[INFO] $messageid: " if $VERBOSE;
+
+		$url = "http://groups.yahoo.com/group/$group/message/$messageid?source=1\&unwrap=1";
+		$request = GET $url;
+		$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
+		print STDERR "[INFO] [Sleeping for $sleep_duration seconds] " if $VERBOSE;
+		sleep($sleep_duration);
+		$response = $ua->simple_request($request);
+		if ($response->is_error) {
+			print STDERR "[ERR] [http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] " . $response->as_string . "\n" if $VERBOSE;
+			exit;
+		}
+		$cookie_jar->extract_cookies($response);
+		while ( $response->is_redirect ) {
+			$url = GetRedirectUrl($response);
+			$request = GET $url;
+			$response = $ua->simple_request($request);
+			if ($response->is_error) {
+				print STDERR "[ERR] [$url] " . $response->as_string . "\n" if $VERBOSE;
 				exit;
 			}
 			$cookie_jar->extract_cookies($response);
@@ -307,18 +334,18 @@ eval {
 		# Is this the holding page when Yahoo is blocking your requests ?
 		# Assuming we are being blocked - lets pause rather than get sacrificed
 		while ($content =~ /Unfortunately, we are unable to process your request at this time/i) {
-			print STDERR "[http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] Yahoo has blocked us ?\n" if $VERBOSE;
+			print STDERR "[WARN] [http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] Yahoo has blocked us ?\n" if $VERBOSE;
 			$sleep_duration = 3600*$cycle;
-			print STDERR "[Sleeping for $sleep_duration seconds] " if $VERBOSE;
+			print STDERR "[INFO] [Sleeping for $sleep_duration seconds] " if $VERBOSE;
 			sleep($sleep_duration);
 			$url = "http://groups.yahoo.com/group/$group/message/$messageid?source=1\&unwrap=1";
 			$request = GET $url;
 			$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-			print STDERR "[Sleeping for $sleep_duration seconds] " if $VERBOSE;
+			print STDERR "[INFO] [Sleeping for $sleep_duration seconds] " if $VERBOSE;
 			sleep($sleep_duration);
 			$response = $ua->simple_request($request);
 			if ($response->is_error) {
-				print STDERR "[http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] " . $response->as_string . "\n" if $VERBOSE;
+				print STDERR "[ERR] [http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] " . $response->as_string . "\n" if $VERBOSE;
 				exit;
 			}
 			$cookie_jar->extract_cookies($response);
@@ -327,7 +354,7 @@ eval {
 				$request = GET $url;
 				$response = $ua->simple_request($request);
 				if ($response->is_error) {
-					print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
+					print STDERR "[ERR] [$url] " . $response->as_string . "\n" if $VERBOSE;
 					exit;
 				}
 				$cookie_jar->extract_cookies($response);
@@ -342,7 +369,7 @@ eval {
 			$request = GET $url;
 			$response = $ua->simple_request($request);
 			if ($response->is_error) {
-				print STDERR "[http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] " . $response->as_string . "\n" if $VERBOSE;
+				print STDERR "[ERR] [http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] " . $response->as_string . "\n" if $VERBOSE;
 				exit;
 			}
 			$cookie_jar->extract_cookies($response);
@@ -351,7 +378,7 @@ eval {
 				$request = GET $url;
 				$response = $ua->simple_request($request);
 				if ($response->is_error) {
-					print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
+					print STDERR "[ERR] [$url] " . $response->as_string . "\n" if $VERBOSE;
 					exit;
 				}
 				$cookie_jar->extract_cookies($response);
