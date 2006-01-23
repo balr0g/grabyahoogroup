@@ -10,6 +10,13 @@ HTML::Entities
 CPAN module installation being out of the scope of this document I would
 recommend you visit http://www.cpan.org to know more.
 
+                             -- WINDOWS --
+You need to have a perl installation on your OS - Windows has two common options
+ActivePerl and Cygwin. CPAN installations would work on the cygwin installation
+assuming you are comfortable with it. Otherwise ActivePerl distributes binary
+releases available through their ppm tool.
+
+                               -- UNIX --
 WARNING: Perl version > 5.6.0 are unicode aware and can cause problems handling
 binary data. Binary data includes all zip files and image files downloaded using
 this script. Please read perldoc perlunicode for more details.
