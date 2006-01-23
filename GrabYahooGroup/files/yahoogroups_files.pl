@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.6 2005-05-12 17:43:51 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.7 2006-01-23 08:00:46 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -63,21 +63,16 @@ my $request;
 my $response;
 my $url;
 my $content;
+my $group_domain;
+
 if ($COOKIE_LOAD and -f $Cookie_file) {
 	$cookie_jar->load();
 }
 
-download_folder('');
-
-sub download_folder {
-	my ($sub_folder) = @_;
-	# print "[$group]$sub_folder\n" if $VERBOSE;
-
-	terminate("$! : $group$sub_folder") unless (-d "$group$sub_folder" or mkdir "$group$sub_folder");
-
-	$request = GET "http://groups.yahoo.com/group/$group/files$sub_folder";
+{
+	$request = GET "http://login.yahoo.com/config/login?.done=http://groups.yahoo.com/group/$group/";
 	$response = $ua->simple_request($request);
-	terminate("[http://groups.yahoo.com/group/$group/files$sub_folder] " . $response->as_string) if $response->is_error;
+	terminate("[http://login.yahoo.com/config/login?.done=http://groups.yahoo.com/group/$group/] " . $response->as_string) if $response->is_error;
 	
 	while ( $response->is_redirect ) {
 		$cookie_jar->extract_cookies($response);
@@ -142,7 +137,7 @@ sub download_folder {
 			 '.ev'    => '',
 			 'hasMsgr' => 0,
 			 '.chkP'  => 'Y',
-			 '.done'  => "http://groups.yahoo.com/group/$group/files$sub_folder",
+			 '.done'  => "http://groups.yahoo.com/group/$group/",
 			 'login'  => $username,
 			 'passwd' => $password,
 			 '.persistent' => 'y',
@@ -164,13 +159,15 @@ sub download_folder {
 		}
 	
 		$content = $response->content;
-	
+
+		($group_domain) = $url =~ /\/\/(.*?groups.yahoo.com)\//;
+
 		terminate("Couldn't log in $username") if ( !$response->is_success );
-	
+
 		terminate("Wrong password entered for $username") if ( $content =~ /Invalid Password/ );
-	
+
 		terminate("Yahoo user $username does not exist") if ( $content =~ /ID does not exist/ );
-	
+
 		print "Successfully logged in as $username.\n" if $VERBOSE; 
 	}
 	
@@ -179,7 +176,7 @@ sub download_folder {
 			$request = POST 'http://groups.yahoo.com/adultconf',
 				[
 				 'ref' => '',
-				 'dest'  => "/group/$group/files$sub_folder",
+				 'dest'  => "/group/$group/files",
 				 'accept' => 'I Accept'
 				];
 		
@@ -205,6 +202,30 @@ sub download_folder {
 			terminate("This is a adult group exiting");
 		}
 	}
+}
+
+download_folder('');
+
+sub download_folder {
+	my ($sub_folder) = @_;
+	# print "[$group]$sub_folder\n" if $VERBOSE;
+
+	terminate("$! : $group$sub_folder") unless (-d "$group$sub_folder" or mkdir "$group$sub_folder");
+
+	$request = GET "http://$group_domain/group/$group/files$sub_folder/";
+	$response = $ua->simple_request($request);
+	terminate("[http://$group_domain/group/$group/files$sub_folder/] " . $response->as_string) if $response->is_error;
+	
+	while ( $response->is_redirect ) {
+		$cookie_jar->extract_cookies($response);
+		$url = GetRedirectUrl($response);
+		$request = GET $url;
+		$response = $ua->simple_request($request);
+		terminate("[$url] " . $response->as_string) if ($response->is_error);
+	}
+	$cookie_jar->extract_cookies($response);
+	
+	$content = $response->content;
 	
 	eval {
 		terminate("Yahoo error : not a member of this group") if $content =~ /You are not a member of the group /;
