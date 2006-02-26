@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.13 2005-11-29 17:43:50 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.14 2006-02-26 11:34:38 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -29,7 +29,7 @@ my $GETADULT = 1; # Allow adult groups to be downloaded.
 my $COOKIE_SAVE = 1; # Save cookies before finishing - wont if aborted.
 my $COOKIE_LOAD = 1; # Load cookies if saved from previous session.
 
-my $HUMAN_WAIT = 40; # Amount of time it would take a human being to read a page
+my $HUMAN_WAIT = 20; # Amount of time it would take a human being to read a page
 my $HUMAN_REFLEX = 20; # Amount of time it would take a human being to react to a page
 
 $| = 1 if ($VERBOSE); # Want to see the messages immediately if I am in verbose mode
@@ -41,6 +41,7 @@ my $HTTP_PROXY_URL = ''; # Proxy server if any http://hostname:port/
 my $TIMEOUT = 10; # Connection timeout changed from default 3 min for slow connection/server
 my $USER_AGENT = 'GrabYahoo/1.00'; # Changing this value is probably unethical at the least and possible illegal at the worst
 my $cycle = 1; # Every block cycle
+my $group_domain;
 
 my $sleep_duration = 0;
 
@@ -50,7 +51,7 @@ unless ($HTTP_PROXY_URL) {
 	}
 }
 
-srand(time() . $$);
+srand($$ . time());
 
 my ($user_group, $bmsg, $emsg) = @ARGV;
 
@@ -100,10 +101,10 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 	$cookie_jar->load();
 }
 
-$request = GET "http://groups.yahoo.com/group/$group/messages/1";
+$request = GET "http://login.yahoo.com/config/login?.done=http://groups.yahoo.com/group/$group/messages/1";
 $response = $ua->simple_request($request);
 if ($response->is_error) {
-	print STDERR "[ERR] [http://groups.yahoo.com/group/$group/messages/1] " . $response->as_string . "\n" if $VERBOSE;
+	print STDERR "[ERR] [http://login.yahoo.com/config/login?.done=http://groups.yahoo.com/group/$group/messages/1] " . $response->as_string . "\n" if $VERBOSE;
 	exit;
 }
 
@@ -184,7 +185,7 @@ if (!(-f $Cookie_file) or $content =~ /Sign in to Yahoo/ or $content =~ /Sign in
 	$request->header('Accept' => '*/*');
 	$request->header('Allowed' => 'GET HEAD PUT');
 	$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-	print STDERR "[INFO] [Sleeping for $sleep_duration seconds] " if $VERBOSE;
+	print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if $VERBOSE;
 	sleep($sleep_duration);
 	$response = $ua->simple_request($request);
 	if ($response->is_error) {
@@ -204,6 +205,8 @@ if (!(-f $Cookie_file) or $content =~ /Sign in to Yahoo/ or $content =~ /Sign in
 	}
 
 	$content = $response->content;
+
+	($group_domain) = $url =~ /\/\/(.*?groups.yahoo.com)\//;
 
 	terminate("Couldn't log in $username") if ( !$response->is_success );
 
@@ -228,7 +231,7 @@ if (($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) or ($
 		$request->header('Accept' => '*/*');
 		$request->header('Allowed' => 'GET HEAD PUT');
 		$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-		print STDERR "[INFO] [Sleeping for $sleep_duration seconds] " if $VERBOSE;
+		print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if $VERBOSE;
 		sleep($sleep_duration);
 		$response = $ua->simple_request($request);
 		if ($response->is_error) {
@@ -267,10 +270,10 @@ eval {
 	while ($content =~ /Unfortunately, we are unable to process your request at this time/i) {
 		print STDERR "[WARN] [" . $request->uri . "] Yahoo has blocked us ?\n" if $VERBOSE;
 		$sleep_duration = 3600*$cycle;
-		print STDERR "[INFO] [Sleeping for $sleep_duration seconds] " if $VERBOSE;
+		print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if $VERBOSE;
 		sleep($sleep_duration);
 		$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-		print STDERR "[INFO] [Sleeping for $sleep_duration seconds] " if $VERBOSE;
+		print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if $VERBOSE;
 		sleep($sleep_duration);
 		$response = $ua->simple_request($request);
 		if ($response->is_error) {
@@ -308,14 +311,14 @@ eval {
 		next if $REFRESH and -f "$group/$messageid";
 		print STDERR "[INFO] $messageid: " if $VERBOSE;
 
-		$url = "http://groups.yahoo.com/group/$group/message/$messageid?source=1\&unwrap=1";
+		$url = "http://$group_domain/group/$group/message/$messageid?source=1\&unwrap=1";
 		$request = GET $url;
 		$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-		print STDERR "[INFO] [Sleeping for $sleep_duration seconds] " if $VERBOSE;
+		print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if $VERBOSE;
 		sleep($sleep_duration);
 		$response = $ua->simple_request($request);
 		if ($response->is_error) {
-			print STDERR "[ERR] [http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] " . $response->as_string . "\n" if $VERBOSE;
+			print STDERR "[ERR] [http://$group_domain/group/$group/message/$messageid?source=1\&unwrap=1] " . $response->as_string . "\n" if $VERBOSE;
 			exit;
 		}
 		$cookie_jar->extract_cookies($response);
@@ -334,18 +337,18 @@ eval {
 		# Is this the holding page when Yahoo is blocking your requests ?
 		# Assuming we are being blocked - lets pause rather than get sacrificed
 		while ($content =~ /Unfortunately, we are unable to process your request at this time/i) {
-			print STDERR "[WARN] [http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] Yahoo has blocked us ?\n" if $VERBOSE;
+			print STDERR "[WARN] [http://$group_domain/group/$group/message/$messageid?source=1\&unwrap=1] Yahoo has blocked us ?\n" if $VERBOSE;
 			$sleep_duration = 3600*$cycle;
-			print STDERR "[INFO] [Sleeping for $sleep_duration seconds] " if $VERBOSE;
+			print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if $VERBOSE;
 			sleep($sleep_duration);
-			$url = "http://groups.yahoo.com/group/$group/message/$messageid?source=1\&unwrap=1";
+			$url = "http://$group_domain/group/$group/message/$messageid?source=1\&unwrap=1";
 			$request = GET $url;
 			$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-			print STDERR "[INFO] [Sleeping for $sleep_duration seconds] " if $VERBOSE;
+			print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if $VERBOSE;
 			sleep($sleep_duration);
 			$response = $ua->simple_request($request);
 			if ($response->is_error) {
-				print STDERR "[ERR] [http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] " . $response->as_string . "\n" if $VERBOSE;
+				print STDERR "[ERR] [http://$group_domain/group/$group/message/$messageid?source=1\&unwrap=1] " . $response->as_string . "\n" if $VERBOSE;
 				exit;
 			}
 			$cookie_jar->extract_cookies($response);
@@ -365,11 +368,11 @@ eval {
 
 		# If the page comes up with just a advertizement without the message.
 		if ($content =~ /Yahoo! Groups is an advertising supported service/ or $content =~ /Continue to message/s) {
-			$url = "http://groups.yahoo.com/group/$group/message/$messageid?source=1\&unwrap=1";
+			$url = "http://$group_domain/group/$group/message/$messageid?source=1\&unwrap=1";
 			$request = GET $url;
 			$response = $ua->simple_request($request);
 			if ($response->is_error) {
-				print STDERR "[ERR] [http://groups.yahoo.com/$group/message/$messageid?source=1\&unwrap=1] " . $response->as_string . "\n" if $VERBOSE;
+				print STDERR "[ERR] [http://$group_domain/group/$group/message/$messageid?source=1\&unwrap=1] " . $response->as_string . "\n" if $VERBOSE;
 				exit;
 			}
 			$cookie_jar->extract_cookies($response);
@@ -396,26 +399,23 @@ eval {
 
 		my ($email_content) = $content =~ /<!-- start content include -->\s(.+?)\s<!-- end content include -->/s;
 
-		my ($email_header, $rest) = $email_content =~ /<table.+?<tt>(.+?)<\/tt>(.+)/s;
-		if ($rest eq $attachment_nobody) {
+		my ($email_header, $email_body) = $email_content =~ /<td class="source">\n<pre>\n(.+?)\n\n(.+)<\/pre>\n<\/td>/s;
+		if ($email_body eq $attachment_nobody) {
 			print "... body contains attachment with no body\n";
 			open (MFD, "> $group/$messageid");
 			close MFD;
 			next;
 		}
-		my ($email_body) = $rest =~ /<tt>(.+?)<\/td>/s;
 
-		$email_header =~ s/<br>//gi;
 		$email_header =~ s/<a href=".+?>(.+?)<\/a>/$1/g; # Yahoo hyperlinks every URL which is not already a hyperlink.
 		$email_header =~ s/<.+?>//g;
 		$email_header = HTML::Entities::decode($email_header);
-		$email_body =~ s/<br>//gi;
 		$email_body =~ s/<a href=".+?>(.+?)<\/a>/$1/g; # Yahoo hyperlinks every URL which is not already a hyperlink.
 		$email_body =~ s/<.+?>//g;
 		$email_body = HTML::Entities::decode($email_body);
 		open (MFD, "> $group/$messageid");
 		print MFD $email_header;
-		print MFD "\n";
+		print MFD "\n\n";
 		print MFD $email_body;
 		close MFD;
 		print "\n" if $VERBOSE;
