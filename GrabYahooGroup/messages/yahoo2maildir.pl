@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.14 2006-02-26 11:34:38 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.15 2006-03-02 17:54:48 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -101,10 +101,10 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 	$cookie_jar->load();
 }
 
-$request = GET "http://login.yahoo.com/config/login?.done=http://groups.yahoo.com/group/$group/messages/1";
+$request = GET "http://groups.yahoo.com/group/$group/messages/1";
 $response = $ua->simple_request($request);
 if ($response->is_error) {
-	print STDERR "[ERR] [http://login.yahoo.com/config/login?.done=http://groups.yahoo.com/group/$group/messages/1] " . $response->as_string . "\n" if $VERBOSE;
+	print STDERR "[ERR] [http://groups.yahoo.com/group/$group/messages/1] " . $response->as_string . "\n" if $VERBOSE;
 	exit;
 }
 
