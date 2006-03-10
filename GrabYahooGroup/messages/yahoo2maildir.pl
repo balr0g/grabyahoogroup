@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.16 2006-03-10 07:58:21 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.17 2006-03-10 09:59:27 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -29,8 +29,8 @@ my $GETADULT = 1; # Allow adult groups to be downloaded.
 my $COOKIE_SAVE = 1; # Save cookies before finishing - wont if aborted.
 my $COOKIE_LOAD = 1; # Load cookies if saved from previous session.
 
-my $HUMAN_WAIT = 20; # Amount of time it would take a human being to read a page
-my $HUMAN_REFLEX = 20; # Amount of time it would take a human being to react to a page
+my $HUMAN_WAIT = 10; # Amount of time it would take a human being to read a page
+my $HUMAN_REFLEX = 5; # Amount of time it would take a human being to react to a page
 
 $| = 1 if ($VERBOSE); # Want to see the messages immediately if I am in verbose mode
 
@@ -43,8 +43,6 @@ my $cycle = 1; # Every block cycle
 my $group_domain;
 
 my $sleep_duration = 0;
-
-srand($$ . time());
 
 my ($user_group, $bmsg, $emsg) = @ARGV;
 
@@ -73,6 +71,11 @@ terminate("End message id : $end_msgid should be greater than begin message id :
 
 my ($group) = $user_group =~ /^([\w_\-]+)$/;
 
+if (! -d $group and ($HUMAN_WAIT < 1 or $HUMAN_REFLEX < 1) ) {
+	print "[WARN] You have disabled the reflex mode on the first run - are you sure this is intentional\n";
+	print "       Hit enter to continue: ";
+	my $cont = <STDIN>;
+}
 unless (-d $group or mkdir $group) {
 	print STDERR "[INFO] $! : $group\n" if $VERBOSE;
 }
@@ -88,13 +91,13 @@ my $cookie_jar = HTTP::Cookies->new( 'file' => $Cookie_file );
 $ua->cookie_jar($cookie_jar);
 my $request;
 my $response;
-my $url;
+my $url = "http://groups.yahoo.com/group/$group/messages/1";
 my $content;
 if ($COOKIE_LOAD and -f $Cookie_file) {
 	$cookie_jar->load();
 }
 
-$request = GET "http://groups.yahoo.com/group/$group/messages/1";
+$request = GET $url;
 $response = $ua->simple_request($request);
 if ($response->is_error) {
 	print STDERR "[ERR] [http://groups.yahoo.com/group/$group/messages/1] " . $response->as_string . "\n" if $VERBOSE;
@@ -182,7 +185,7 @@ if (!(-f $Cookie_file) or $content =~ /sign\s+in\s+now/i or $content =~ /Sign in
 	$request->header('Accept' => '*/*');
 	$request->header('Allowed' => 'GET HEAD PUT');
 	$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-	print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if $VERBOSE;
+	print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if ($VERBOSE and $sleep_duration);
 	sleep($sleep_duration);
 	$response = $ua->simple_request($request);
 	if ($response->is_error) {
@@ -203,8 +206,6 @@ if (!(-f $Cookie_file) or $content =~ /sign\s+in\s+now/i or $content =~ /Sign in
 
 	$content = $response->content;
 
-	($group_domain) = $url =~ /\/\/(.*?groups.yahoo.com)\//;
-
 	terminate("Couldn't log in $username") if ( !$response->is_success );
 
 	terminate("Wrong password entered for $username") if ( $content =~ /Invalid Password/ );
@@ -212,6 +213,8 @@ if (!(-f $Cookie_file) or $content =~ /sign\s+in\s+now/i or $content =~ /Sign in
 	terminate("Yahoo user $username does not exist") if ( $content =~ /ID does not exist/ );
 
 	print STDERR "[INFO] Successfully logged in as $username.\n" if $VERBOSE; 
+
+	$cookie_jar->save if $COOKIE_SAVE;
 }
 
 
@@ -231,7 +234,7 @@ if (($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) or ($
 		$request->header('Accept' => '*/*');
 		$request->header('Allowed' => 'GET HEAD PUT');
 		$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-		print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if $VERBOSE;
+		print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if ($VERBOSE and $sleep_duration);
 		sleep($sleep_duration);
 		$response = $ua->simple_request($request);
 		if ($response->is_error) {
@@ -254,6 +257,8 @@ if (($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) or ($
 		$content = $response->content;
 	
 		print STDERR "[INFO] Confirmed as a adult\n" if $VERBOSE;
+
+		$cookie_jar->save if $COOKIE_SAVE;
 	} else {
 		print STDERR "[ERR] This is a adult group exiting\n" if $VERBOSE;
 		exit;
@@ -265,15 +270,17 @@ if ($content =~ /You are not a member of the group <b>$group/) {
 	exit;
 }
 
+($group_domain) = $url =~ /\/\/(.*?groups.yahoo.com)\//;
+
 eval {
 	$content = $response->content;
 	while ($content =~ /Unfortunately, we are unable to process your request at this time/i) {
 		print STDERR "[WARN] [" . $request->uri . "] Yahoo has blocked us ?\n" if $VERBOSE;
 		$sleep_duration = 3600*$cycle;
-		print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if $VERBOSE;
+		print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if ($VERBOSE and $sleep_duration);
 		sleep($sleep_duration);
 		$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-		print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if $VERBOSE;
+		print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if ($VERBOSE and $sleep_duration);
 		sleep($sleep_duration);
 		$response = $ua->simple_request($request);
 		if ($response->is_error) {
@@ -314,7 +321,7 @@ eval {
 		$url = "http://$group_domain/group/$group/message/$messageid?source=1\&unwrap=1";
 		$request = GET $url;
 		$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-		print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if $VERBOSE;
+		print STDERR "\n[INFO] [Sleeping for $sleep_duration seconds]\t" if ($VERBOSE and $sleep_duration);
 		sleep($sleep_duration);
 		$response = $ua->simple_request($request);
 		if ($response->is_error) {
@@ -339,12 +346,12 @@ eval {
 		while ($content =~ /Unfortunately, we are unable to process your request at this time/i) {
 			print STDERR "[WARN] [http://$group_domain/group/$group/message/$messageid?source=1\&unwrap=1] Yahoo has blocked us ?\n" if $VERBOSE;
 			$sleep_duration = 3600*$cycle;
-			print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if $VERBOSE;
+			print STDERR "\n[INFO] [Sleeping for $sleep_duration seconds]\t" if ($VERBOSE and $sleep_duration);
 			sleep($sleep_duration);
 			$url = "http://$group_domain/group/$group/message/$messageid?source=1\&unwrap=1";
 			$request = GET $url;
 			$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-			print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if $VERBOSE;
+			print STDERR "\n[INFO] [Sleeping for $sleep_duration seconds]\t" if ($VERBOSE and $sleep_duration);
 			sleep($sleep_duration);
 			$response = $ua->simple_request($request);
 			if ($response->is_error) {
@@ -419,9 +426,9 @@ eval {
 		print MFD $email_body;
 		close MFD;
 		print "\n" if $VERBOSE;
-	}
 
-	$cookie_jar->save if $COOKIE_SAVE;
+		$cookie_jar->save if $COOKIE_SAVE;
+	}
 };
 
 if ($@) {
