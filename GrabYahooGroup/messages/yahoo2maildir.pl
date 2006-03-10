@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.15 2006-03-02 17:54:48 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.16 2006-03-10 07:58:21 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -37,19 +37,12 @@ $| = 1 if ($VERBOSE); # Want to see the messages immediately if I am in verbose 
 my $username = ''; # Better here than the commandline.
 my $password = $ENV{'GY_PASSWD'};
 $password = '' unless $password; # Better here than the commandline.
-my $HTTP_PROXY_URL = ''; # Proxy server if any http://hostname:port/
 my $TIMEOUT = 10; # Connection timeout changed from default 3 min for slow connection/server
 my $USER_AGENT = 'GrabYahoo/1.00'; # Changing this value is probably unethical at the least and possible illegal at the worst
 my $cycle = 1; # Every block cycle
 my $group_domain;
 
 my $sleep_duration = 0;
-
-unless ($HTTP_PROXY_URL) {
-	if ($ENV{'http_proxy'}) {
-		$HTTP_PROXY_URL = $ENV{'http_proxy'};
-	}
-}
 
 srand($$ . time());
 
@@ -86,8 +79,8 @@ unless (-d $group or mkdir $group) {
 
 my $Cookie_file = "$group/yahoogroups.cookies";
 
-my $ua = LWP::UserAgent->new;
-$ua->proxy('http', $HTTP_PROXY_URL) if $HTTP_PROXY_URL;
+my $ua = LWP::UserAgent->new(keep_alive => 10);
+$ua->env_proxy();
 $ua->agent($USER_AGENT);
 $ua->timeout($TIMEOUT*60);
 print STDERR "[INFO] Setting timeout to : " . $ua->timeout() . "\n" if $VERBOSE;
@@ -125,11 +118,15 @@ $content = $response->content;
 my $login_rand;
 my $u;
 my $challenge;
+my $done;
 
-if (!(-f $Cookie_file) or $content =~ /Sign in to Yahoo/ or $content =~ /Sign in with your ID and password to continue/ or $content =~ /To access\s+Yahoo! Groups...<\/span><br>\s+<strong>Sign in to Yahoo/ or $content =~ /Verify your Yahoo! password to continue/ or $content =~ /sign in<\/a> now/) {
+if (!(-f $Cookie_file) or $content =~ /sign\s+in\s+now/i or $content =~ /Sign in to Yahoo/ or $content =~ /Sign in with your ID and password to continue/ or $content =~ /To access\s+Yahoo! Groups...<\/span><br>\s+<strong>Sign in to Yahoo/ or $content =~ /Verify your Yahoo! password to continue/ or $content =~ /sign in<\/a> now/) {
 	($login_rand) = $content =~ /<form method=post action="https:\/\/login.yahoo.com\/config\/login\?(.+?)"/s;
 	($u) = $content =~ /<input type=hidden name=".u" value="(.+?)" >/s;
 	($challenge) = $content =~ /<input type=hidden name=".challenge" value="(.+?)" >/s;
+        ($done) = $content =~ /.done=(.+?)"/;
+        $done = "http://groups.yahoo.com/group/$group/messages/1" unless $done;
+        $done =~ s/\%([A-Fa-f0-9]{2})/pack('C', hex($1))/eg;
 
 	unless ($username) {
 		my ($slogin) = $content =~ /<input type=hidden name=".slogin" value="(.+?)" >/;
@@ -174,7 +171,7 @@ if (!(-f $Cookie_file) or $content =~ /Sign in to Yahoo/ or $content =~ /Sign in
 		 '.ev'    => '',
 		 'hasMsgr' => 0,
 		 '.chkP'  => 'Y',
-		 '.done'  => "http://groups.yahoo.com/group/$group/messages/1",
+		 '.done'  => $done,
 		 'login'  => $username,
 		 'passwd' => $password,
 		 '.persistent' => 'y',
@@ -220,10 +217,13 @@ if (!(-f $Cookie_file) or $content =~ /Sign in to Yahoo/ or $content =~ /Sign in
 
 if (($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) or ($content =~ /you have reached an age-restricted area of Yahoo! Groups/)) {
 	if ($GETADULT) {
+                my ($ycb) = $content =~ /<input type="hidden" name="ycb" value="(.+?)">/;
+                my ($dest) = $content =~ /<input type="hidden" name="dest" value="(.+?)">/;
 		$request = POST 'http://groups.yahoo.com/adultconf',
 			[
 			 'ref' => '',
-			 'dest'  => "/group/$group/messages/1",
+			 'dest'  => $dest,
+                         'ycb' => $ycb,
 			 'accept' => 'I Accept'
 			];
 	
