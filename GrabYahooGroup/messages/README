@@ -28,6 +28,9 @@ destination mbox File Name
 The script will by default restart the download process and by default will remember
 who you logged in as when you retrived the last set of messages
 
+If you are directly connected to the internet set the following environment variable
+PERL_LWP_USE_HTTP_10=1
+
 
 # Mandatory : group to download
 # Optional : begining message id and ending message id.
