@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.7 2006-01-23 08:00:46 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.8 2006-04-06 16:53:27 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -173,10 +173,13 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 	
 	if (($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) or ($content =~ /you have reached an age-restricted area of Yahoo! Groups/)) {
 		if ($GETADULT) {
+			my ($ycb) = $content =~ /<input type="hidden" name="ycb" value="(.+?)">/;
+			my ($dest) = $content =~ /<input type="hidden" name="dest" value="(.+?)">/;
 			$request = POST 'http://groups.yahoo.com/adultconf',
 				[
 				 'ref' => '',
-				 'dest'  => "/group/$group/files",
+				 'dest' => $dest,
+				 'ycb' => $ycb,
 				 'accept' => 'I Accept'
 				];
 		
