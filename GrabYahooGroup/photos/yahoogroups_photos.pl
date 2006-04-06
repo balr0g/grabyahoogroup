@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/photos/yahoogroups_photos.pl,v 1.5 2005-08-30 15:03:23 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/photos/yahoogroups_photos.pl,v 1.6 2006-04-06 18:52:19 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -170,14 +170,19 @@ if ($cookie_jar->as_string eq '' or ($init_content =~ /Sign in with your ID and 
 	die "Yahoo user $username does not exist\n" if ( $init_content =~ /ID does not exist/ );
 
 	print "Successfully logged in as $username.\n" if $VERBOSE; 
+
+	$cookie_jar->save if $COOKIE_SAVE;
 }
 
 if (($init_content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) or ($init_content =~ /you have reached an age-restricted area of Yahoo! Groups/)) {
 	if ($GETADULT) {
+		my ($ycb) = $init_content =~ /<input type="hidden" name="ycb" value="(.+?)">/;
+		my ($dest) = $init_content =~ /<input type="hidden" name="dest" value="(.+?)">/;
 		$request = POST 'http://groups.yahoo.com/adultconf',
 			[
 			 'ref' => '',
-			 'dest'  => "/group/$group/files",
+			 'dest' => $dest,
+			 'ycb' => $ycb,
 			 'accept' => 'I Accept'
 			];
 	
@@ -205,6 +210,8 @@ if (($init_content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) 
 		$init_content = $response->content;
 	
 		print "Confirmed as a adult\n" if $VERBOSE;
+
+		$cookie_jar->save if $COOKIE_SAVE;
 	} else {
 		print STDERR "This is a adult group exiting\n" if $VERBOSE;
 		exit;
@@ -213,7 +220,7 @@ if (($init_content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) 
 
 eval {
 	die "Yahoo error : database unavailable" if $init_content =~ /The database is unavailable at the moment/;
-	download_folder('');
+	download_folder('', '');
 	$cookie_jar->save if $COOKIE_SAVE;
 };
 
@@ -223,31 +230,22 @@ if ($@) {
 }
 
 
-sub UrlDecode {
-	my ($folder) = @_;
-	$folder =~ s/\+/ /g;
-	$folder =~ s/%([a-fA-F0-9]{2,2})/chr(hex($1))/eg;
-	return $folder;
-}
-
-
 sub download_folder {
-	my ($sub_folder) = @_;
+	my ($folder_id, $folder_name) = @_;
 
-	my $folder = UrlDecode($sub_folder);
-	print "[$group]$folder\n" if $VERBOSE;
+	print "[$group]$folder_name\n" if $VERBOSE;
 
-	unless (-d "$group$folder" or mkdir "$group$folder") {
-		print STDERR "$! : $group$folder\n" if $VERBOSE;
+	unless (-d "$group/$folder_name" or mkdir "$group/$folder_name") {
+		print STDERR "$! : $group/$folder_name\n" if $VERBOSE;
 	}
 
-	$request = GET "http://photos.groups.yahoo.com/group/$group/lst?.dir=$sub_folder&.src=gr&.begin=9999&.view=l&order=";
+	$request = GET "http://ph.groups.yahoo.com/group/$group/photos/browse/$folder_id?b=1&m=t";
 	$response = $ua->simple_request($request);
 	if ($response->is_error) {
-		print STDERR "[http://photos.groups.yahoo.com/group/$group/lst?.dir=$sub_folder&.src=gr&.begin=9999&.view=l&.order=] " . $response->as_string . "\n" if $VERBOSE;
+		print STDERR "[http://ph.groups.yahoo.com/group/$group/photos/browse/$folder_id?b=1&m=t] " . $response->as_string . "\n" if $VERBOSE;
 		return;
 	}
-	
+
 	while ( $response->is_redirect ) {
 		$cookie_jar->extract_cookies($response);
 		$url = GetRedirectUrl($response);
@@ -259,30 +257,57 @@ sub download_folder {
 		}
 	}
 	$cookie_jar->extract_cookies($response);
-	
-	my $content = $response->content;
+
+	my ($content) = $response->content =~ /<!-- start content include -->\n(.+)\n<!-- end content include -->/s;
 
 	my @locators;
-	
-	while ($content =~ /<tr.*?>\s+<td nowrap valign=middle>.+?<a href="(.+?)">.+?<\/tr>/sg) {
+
+	while ($content =~ /<td class="bold">(<a href=".+?">.+?<\/a>)<\/td>/sg) {
 		push @locators, $1;
 	}
 
-	foreach my $file_url (@locators) {
-		if ($file_url =~ /lst\?\.dir=(.+?)\&/) {
-			download_folder($1);
+	while ($response->content =~ /<a href="\/group\/$group\/photos\/browse\/$folder_id\?b=(\d+).+?">Next/) {
+		my $next = $1;
+		$request = GET "http://ph.groups.yahoo.com/group/$group/photos/browse/$folder_id?b=$next&m=t";
+		$response = $ua->simple_request($request);
+		if ($response->is_error) {
+			print STDERR "[http://ph.groups.yahoo.com/group/$group/photos/browse/$folder_id?b=$next&m=t] " . $response->as_string . "\n" if $VERBOSE;
+			return;
+		}
+
+		while ( $response->is_redirect ) {
+			$cookie_jar->extract_cookies($response);
+			$url = GetRedirectUrl($response);
+			$request = GET $url;
+			$response = $ua->simple_request($request);
+			if ($response->is_error) {
+				print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
+				return;
+			}
+		}
+		$cookie_jar->extract_cookies($response);
+
+		($content) = $response->content =~ /<!-- start content include -->\n(.+)\n<!-- end content include -->/s;
+
+		while ($content =~ /<td class="bold">(<a href=".+?">.+?<\/a>)<\/td>/sg) {
+			push @locators, $1;
+		}
+	}
+
+	foreach my $file_loc (@locators) {
+		if (my ($folder_id, $folder_name) = $file_loc =~ /"\/group\/$group\/photos\/browse\/(.+?)">(.+?)<\/a>/) {
+			download_folder($folder_id, $folder_name);
 			next;
 		}
 
-		my ($file_name) = $file_url =~ /vwp\?\.dir.+?\.dnm=(.+?)\&/;
-		$file_name = UrlDecode($file_name);
-		next if -f "$group$folder/$file_name";
-		print "\t$folder/$file_name .." if $VERBOSE;
+		my ($file_seq, $file_name) = $file_loc =~ /"\/group\/$group\/photos\/view\/$folder_id\?b=(\d+)">(.+?)<\/a>/;
+		next if -f "$group/$folder_name/$file_seq.jpg";
+		print "\t$folder_name/$file_name .." if $VERBOSE;
 
-		$request = GET $file_url;
+		$request = GET "http://ph.groups.yahoo.com/group/$group/photos/view/$folder_id?b=$file_seq&m=f&o=0";
 		$response = $ua->simple_request($request);
 		if ($response->is_error) {
-			print STDERR "\n\t[$file_url] " . $response->as_string . "\n" if $VERBOSE;
+			print STDERR "\n\t[http://ph.groups.yahoo.com/group/$group/photos/view/$folder_id?b=$file_seq&m=f&o=0] " . $response->as_string . "\n" if $VERBOSE;
 			next;
 		}
 		while ( $response->is_redirect ) {
@@ -299,17 +324,17 @@ sub download_folder {
 		$content = $response->content;
 		# If the page comes up with just a advertizement without the message.
 		if ($content =~ /Continue to message/s) {
-			$request = GET $file_url;
+			$request = GET "http://ph.groups.yahoo.com/group/$group/photos/view/$folder_id?b=$file_seq&m=f&o=0";
 			$response = $ua->simple_request($request);
 			if ($response->is_error) {
-				print STDERR "\n\t[$file_url] " . $response->as_string . "\n" if $VERBOSE;
+				print STDERR "\n\t[http://ph.groups.yahoo.com/group/$group/photos/view/$folder_id?b=$file_seq&m=f&o=0] " . $response->as_string . "\n" if $VERBOSE;
 				next;
 			}
 			$content = $response->content;
 		}
 		$cookie_jar->extract_cookies($response);
 
-		my ($image_url) = $content =~ /<table bgcolor=\w+\s.+?<img src="(.+?)".+?<\/table>/s;
+		my ($image_url) = $content =~ /<!-- start content include -->.+<img src="(.+?)".+<!-- end content include -->/s;
 		die "Image URL not found .. dumping content\n$content\n" unless $image_url;
 		$request = GET $image_url;
 		$response = $ua->simple_request($request);
@@ -330,13 +355,14 @@ sub download_folder {
 		$cookie_jar->extract_cookies($response);
 		$content = $response->content;
 
-		die "$! : $group$folder/$file_name\n" unless open(IFD, "> $group$folder/$file_name");
+		die "$! : $group/$folder_name/$file_name\n" unless open(IFD, "> $group/$folder_name/$file_seq.jpg");
 		binmode(IFD);
 		print IFD $content;
 		close IFD;
 		print ".. done\n" if $VERBOSE;
-	}
 
+		$cookie_jar->save if $COOKIE_SAVE;
+	}
 }
 
 sub GetRedirectUrl($) {
