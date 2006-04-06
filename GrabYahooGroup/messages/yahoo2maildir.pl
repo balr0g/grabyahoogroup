@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.17 2006-03-10 09:59:27 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.18 2006-04-06 16:36:52 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -29,8 +29,8 @@ my $GETADULT = 1; # Allow adult groups to be downloaded.
 my $COOKIE_SAVE = 1; # Save cookies before finishing - wont if aborted.
 my $COOKIE_LOAD = 1; # Load cookies if saved from previous session.
 
-my $HUMAN_WAIT = 10; # Amount of time it would take a human being to read a page
-my $HUMAN_REFLEX = 5; # Amount of time it would take a human being to react to a page
+my $HUMAN_WAIT = 5; # Amount of time it would take a human being to read a page
+my $HUMAN_REFLEX = 10; # Amount of time it would take a human being to react to a page
 
 $| = 1 if ($VERBOSE); # Want to see the messages immediately if I am in verbose mode
 
@@ -406,7 +406,7 @@ eval {
 
 		my ($email_content) = $content =~ /<!-- start content include -->\s(.+?)\s<!-- end content include -->/s;
 
-		my ($email_header, $email_body) = $email_content =~ /<td class="source">\n<pre>\n(.+?)\n\n(.+)<\/pre>\n<\/td>/s;
+		my ($email_header, $email_body) = $email_content =~ /<td class="source">\n<pre>\n\s*\n(.+?)\n\s*\n\s*(.+)<\/pre>\n<\/td>/s;
 		if ($email_body eq $attachment_nobody) {
 			print "... body contains attachment with no body\n";
 			open (MFD, "> $group/$messageid");
