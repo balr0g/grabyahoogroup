@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.8 2006-04-06 16:53:27 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.9 2006-04-06 17:40:14 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -169,6 +169,8 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 		terminate("Yahoo user $username does not exist") if ( $content =~ /ID does not exist/ );
 
 		print "Successfully logged in as $username.\n" if $VERBOSE; 
+		
+		$cookie_jar->save if $COOKIE_SAVE;
 	}
 	
 	if (($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) or ($content =~ /you have reached an age-restricted area of Yahoo! Groups/)) {
@@ -201,6 +203,8 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 			$content = $response->content;
 		
 			print "Confirmed as a adult\n" if $VERBOSE;
+		
+			$cookie_jar->save if $COOKIE_SAVE;
 		} else {
 			terminate("This is a adult group exiting");
 		}
@@ -276,9 +280,9 @@ sub download_folder {
 			binmode(IFD);
 			print IFD $content;
 			close IFD;
-		}
 		
-		$cookie_jar->save if $COOKIE_SAVE;
+			$cookie_jar->save if $COOKIE_SAVE;
+		}
 	};
 	
 	if ($@) {
