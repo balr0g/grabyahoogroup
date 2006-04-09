@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/members/yahoogroups_members.pl,v 1.3 2005-05-23 22:10:42 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/members/yahoogroups_members.pl,v 1.4 2006-04-09 08:41:39 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -173,10 +173,13 @@ sub download_members {
 	
 	if (($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) or ($content =~ /you have reached an age-restricted area of Yahoo! Groups/)) {
 		if ($GETADULT) {
+			my ($ycb) = $content =~ /<input type="hidden" name="ycb" value="(.+?)">/;
+			my ($dest) = $content =~ /<input type="hidden" name="dest" value="(.+?)">/;
 			$request = POST 'http://groups.yahoo.com/adultconf',
 				[
 				 'ref' => '',
-				 'dest'  => "/group/$group/members?start=0&xm=1&m=s&group=sub",
+				 'dest' => $dest,
+				 'ycb' => $ycb,
 				 'accept' => 'I Accept'
 				];
 		
