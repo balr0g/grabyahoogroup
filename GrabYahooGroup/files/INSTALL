@@ -1,6 +1,7 @@
 The script is a standalone script but it requires the following perl modules to
 be installed on your machine.
 
+Crypt::SSLeay
 HTTP::Request::Common
 HTTP::Cookies
 LWP::UserAgent
@@ -18,6 +19,8 @@ ActivePerl and Cygwin. CPAN installations would work on the cygwin installation
 assuming you are comfortable with it. Otherwise ActivePerl distributes binary
 releases available through their ppm tool.
 
+Crypt::SSLeay doesnt come in as default in ActivePerl visit their website for more
+details as to how to install it using ppm.
                                -- UNIX --
 WARNING: Perl version > 5.6.0 are Unicode aware and can cause problems handling
 binary data. Binary data includes all zip files and image files downloaded using
