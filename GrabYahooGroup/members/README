@@ -1,8 +1,6 @@
-The script will output a tab separated file with as much data as it can extract
-If there is any data which is visible on the web and not in the output please
-contact the author.
-Note: You can save the output as a .xls file and MS Excel will pick it up
-correctly.
+The script will create a comma separated file with as much data as it can extract
+in the current directory. The file is called "group name".csv You can double click
+ on the file to open in MS excel if you wish to.
 
 [MANDATORY] group to download
 
