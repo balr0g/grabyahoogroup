@@ -1,11 +1,12 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/members/yahoogroups_members.pl,v 1.4 2006-04-09 08:41:39 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/members/yahoogroups_members.pl,v 1.5 2007-01-28 01:16:45 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
 use strict;
 
+use Crypt::SSLeay;
 use HTTP::Request::Common qw(GET POST);
 use HTTP::Cookies ();
 use LWP::UserAgent ();
@@ -60,10 +61,10 @@ download_members();
 
 sub download_members {
 
-	$request = GET "http://groups.yahoo.com/group/$group/members?start=0&xm=1&m=s&group=sub";
+	$request = GET "https://login.yahoo.com/config/login_verify2?.intl=us&.src=ygrp&.done=http%3a%2F%2Fgroups.yahoo.com%2Fgroup%2F$group%2Fmembers%3fstart%3D0%26xm%3D1%26m%3Ds%26group%3Dsub";
 	$response = $ua->simple_request($request);
 	if ($response->is_error) {
-		print STDERR "[http://groups.yahoo.com/group/$group/members?start=0&xm=1&m=s&group=sub] " . $response->as_string . "\n" if $VERBOSE;
+		print STDERR "[https://login.yahoo.com/config/login_verify2?.intl=us&.src=ygrp&.done=http%3a%2F%2Fgroups.yahoo.com%2Fgroup%2F$group%2Fmembers%3fstart%3D0%26xm%3D1%26m%3Ds%26group%3Dsub] " . $response->as_string . "\n" if $VERBOSE;
 		exit;
 	}
 	
@@ -218,6 +219,9 @@ sub download_members {
 		terminate("Yahoo error : member list available only to moderator") if $content =~ /You are not a moderator of the group /;
 		terminate("Yahoo error : nonexistant group") if $content =~ /There is no group called /;
 		terminate("Yahoo error : database unavailable") if $content =~ /The database is unavailable at the moment/;
+
+		open (MFD, "> $group.csv") or die "$group.csv:$!\n";
+		print MFD "Member,Online,Yahoo id,Email id,Join Date\n";
 		while (1) {
 			my ($cells) = $content =~ /<!-- start content include -->\s+(.+?)\s+<!-- end content include -->/s;
 			while ($cells =~ /<td class="info">(.+?)<\/td>\s<td class="yid selected ygrp-nowrap">\s(.+?)\s<\/td>\s<td class="email ygrp-nowrap">\s(.+?)\s<\/td>\s<td class="date ygrp-nowrap">\s(.+?)\s<\/td>/sg) {
@@ -248,7 +252,7 @@ sub download_members {
 
 				$join_date =~ s/&nbsp;/ /g;
 
-				print "$member\t$online\t$yahoo_id\t$email_id\t$join_date\n";
+				print MFD "$member,$online,$yahoo_id,$email_id,$join_date\n";
 			}
 			last if $content =~ /<span class="inactive">Next&nbsp;&gt;<\/span>/;
 
@@ -274,6 +278,7 @@ sub download_members {
 
 			$content = $response->content;
 		}
+		close MFD;
 	};
 
 	if ($@) {
