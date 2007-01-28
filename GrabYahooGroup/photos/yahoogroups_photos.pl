@@ -1,11 +1,12 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/photos/yahoogroups_photos.pl,v 1.6 2006-04-06 18:52:19 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/photos/yahoogroups_photos.pl,v 1.7 2007-01-28 00:38:16 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
 use strict;
 
+use Crypt::SSLeay;
 use HTTP::Request::Common qw(GET POST);
 use HTTP::Cookies ();
 use LWP::UserAgent ();
@@ -239,7 +240,7 @@ sub download_folder {
 		print STDERR "$! : $group/$folder_name\n" if $VERBOSE;
 	}
 
-	$request = GET "http://ph.groups.yahoo.com/group/$group/photos/browse/$folder_id?b=1&m=t";
+	$request = GET "http://ph.groups.yahoo.com/group/$group/photos/browse/$folder_id";
 	$response = $ua->simple_request($request);
 	if ($response->is_error) {
 		print STDERR "[http://ph.groups.yahoo.com/group/$group/photos/browse/$folder_id?b=1&m=t] " . $response->as_string . "\n" if $VERBOSE;
@@ -262,7 +263,11 @@ sub download_folder {
 
 	my @locators;
 
-	while ($content =~ /<td class="bold">(<a href=".+?">.+?<\/a>)<\/td>/sg) {
+	while ($content =~ m!(<a href="/group/$group/photos/browse/\w+">[\w_ -]+</a>)!sg) {
+		push @locators, $1;
+	}
+
+	while ($content =~ m!(<a href="/group/$group/photos/view/\w+\?b=\d+"><img src="http://.+?/__tn_/.+?"></a>)!sg) {
 		push @locators, $1;
 	}
 
@@ -289,25 +294,28 @@ sub download_folder {
 
 		($content) = $response->content =~ /<!-- start content include -->\n(.+)\n<!-- end content include -->/s;
 
-		while ($content =~ /<td class="bold">(<a href=".+?">.+?<\/a>)<\/td>/sg) {
+		while ($content =~ m!(<a href="/group/$group/photos/browse/\w+">[\w_ -]+<\/a>)!sg) {
+			push @locators, $1;
+		}
+		while ($content =~ m!(<a href="/group/$group/photos/view/\w+\?b=\d+"><img src="http://.+?/__tn_/.+?"></a>)!sg) {
 			push @locators, $1;
 		}
 	}
 
 	foreach my $file_loc (@locators) {
-		if (my ($folder_id, $folder_name) = $file_loc =~ /"\/group\/$group\/photos\/browse\/(.+?)">(.+?)<\/a>/) {
+		if (my ($folder_id, $folder_name) = $file_loc =~ m!<a href="/group/$group/photos/browse/(.+?)">(.+?)</a>!) {
 			download_folder($folder_id, $folder_name);
 			next;
 		}
 
-		my ($file_seq, $file_name) = $file_loc =~ /"\/group\/$group\/photos\/view\/$folder_id\?b=(\d+)">(.+?)<\/a>/;
-		next if -f "$group/$folder_name/$file_seq.jpg";
+		my ($file_seq, $file_name) = $file_loc =~ m!"/group/$group/photos/view/$folder_id\?b=(\d+)"><img src="http://.+?/__tn_/([^.]+\.\w+)\?.+?"></a>!;
+		next if -f "$group/$folder_name/$file_name";
 		print "\t$folder_name/$file_name .." if $VERBOSE;
 
-		$request = GET "http://ph.groups.yahoo.com/group/$group/photos/view/$folder_id?b=$file_seq&m=f&o=0";
+		$request = GET "http://ph.groups.yahoo.com/group/$group/photos/view/$folder_id?b=$file_seq";
 		$response = $ua->simple_request($request);
 		if ($response->is_error) {
-			print STDERR "\n\t[http://ph.groups.yahoo.com/group/$group/photos/view/$folder_id?b=$file_seq&m=f&o=0] " . $response->as_string . "\n" if $VERBOSE;
+			print STDERR "\n\t[http://ph.groups.yahoo.com/group/$group/photos/view/$folder_id?b=$file_seq] " . $response->as_string . "\n" if $VERBOSE;
 			next;
 		}
 		while ( $response->is_redirect ) {
@@ -324,10 +332,10 @@ sub download_folder {
 		$content = $response->content;
 		# If the page comes up with just a advertizement without the message.
 		if ($content =~ /Continue to message/s) {
-			$request = GET "http://ph.groups.yahoo.com/group/$group/photos/view/$folder_id?b=$file_seq&m=f&o=0";
+			$request = GET "http://ph.groups.yahoo.com/group/$group/photos/view/$folder_id?b=$file_seq";
 			$response = $ua->simple_request($request);
 			if ($response->is_error) {
-				print STDERR "\n\t[http://ph.groups.yahoo.com/group/$group/photos/view/$folder_id?b=$file_seq&m=f&o=0] " . $response->as_string . "\n" if $VERBOSE;
+				print STDERR "\n\t[http://ph.groups.yahoo.com/group/$group/photos/view/$folder_id?b=$file_seq] " . $response->as_string . "\n" if $VERBOSE;
 				next;
 			}
 			$content = $response->content;
@@ -335,7 +343,7 @@ sub download_folder {
 		$cookie_jar->extract_cookies($response);
 
 		my ($image_url) = $content =~ /<!-- start content include -->.+<img src="(.+?)".+<!-- end content include -->/s;
-		die "Image URL not found .. dumping content\n$content\n" unless $image_url;
+		die "Image URL not found .. dumping content\n$content\n" if (! $image_url and $VERBOSE);
 		$request = GET $image_url;
 		$response = $ua->simple_request($request);
 		if ($response->is_error) {
@@ -355,7 +363,7 @@ sub download_folder {
 		$cookie_jar->extract_cookies($response);
 		$content = $response->content;
 
-		die "$! : $group/$folder_name/$file_name\n" unless open(IFD, "> $group/$folder_name/$file_seq.jpg");
+		die "$! : $group/$folder_name/$file_name\n" unless open(IFD, "> $group/$folder_name/$file_name");
 		binmode(IFD);
 		print IFD $content;
 		close IFD;

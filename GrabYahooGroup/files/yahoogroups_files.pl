@@ -1,11 +1,12 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.9 2006-04-06 17:40:14 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.10 2007-01-28 00:39:46 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
 use strict;
 
+use Crypt::SSLeay;
 use HTTP::Request::Common qw(GET POST);
 use HTTP::Cookies ();
 use LWP::UserAgent ();
@@ -238,6 +239,7 @@ sub download_folder {
 		terminate("Yahoo error : not a member of this group") if $content =~ /You are not a member of the group /;
 		terminate("Yahoo error : nonexistant group") if $content =~ /There is no group called /;
 		terminate("Yahoo error : database unavailable") if $content =~ /The database is unavailable at the moment/;
+		next if $content =~ /This folder is empty/;
 		my ($cells) = $content =~ /<!-- start content include -->\s+(.+?)\s+<!-- end content include -->/s;
 		while ($cells =~ /<tr>.+?<span class="title">\s+<a href="(.+?)">(.+?)<\/a>\s+<\/span>.+?<\/tr>/sg) {
 			my $file_url = $1;
