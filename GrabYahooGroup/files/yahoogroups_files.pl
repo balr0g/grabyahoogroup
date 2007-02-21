@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.10 2007-01-28 00:39:46 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.11 2007-02-21 01:00:34 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -12,6 +12,7 @@ use HTTP::Cookies ();
 use LWP::UserAgent ();
 use LWP::Simple ();
 use Getopt::Long;
+use HTML::Entities;
 
 # By default works in verbose mode unless VERBOSE=0 via environment variable for cron job.
 my $VERBOSE = 1;
@@ -89,11 +90,13 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 	my $login_rand;
 	my $u;
 	my $challenge;
+	my $pd;
 	
 	if ($content =~ /Sign in to Yahoo/ or $content =~ /Sign in with your ID and password to continue/ or $content =~ /Verify your Yahoo! password to continue/) {
-		($login_rand) = $content =~ /<form method=post action="https:\/\/login.yahoo.com\/config\/login\?(.+?)"/s;
+		($login_rand) = $content =~ /<form method=post action="https:\/\/login.yahoo.com\/config\/login_verify2\?(.*?)"/s;
 		($u) = $content =~ /<input type=hidden name=".u" value="(.+?)" >/s;
 		($challenge) = $content =~ /<input type=hidden name=".challenge" value="(.+?)" >/s;
+		($pd) = $content =~ /<input type=hidden name=".pd" value="(.+?)" >/s;
 
 		unless ($username) {
 			my ($slogin) = $content =~ /<input type=hidden name=".slogin" value="(.+?)" >/;
@@ -116,32 +119,30 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 			print "\n";
 		}
 	
-		$request = POST 'http://login.yahoo.com/config/login',
+		$request = POST 'http://login.yahoo.com/config/login_verify2',
 			[
-			 '.tries' => '1',
 			 '.src'   => 'ygrp',
+			 '.tries' => '1',
+			 '.done'  => "http://groups.yahoo.com/group/$group/",
 			 '.md5'   => '',
 			 '.hash'  => '',
 			 '.js'    => '',
-			 '.last'  => '',
-			 'promo'  => '',
-			 '.intl'  => 'us',
-			 '.bypass' => '',
 			 '.partner' => '',
-			 '.u'     => $u,
-			 '.v'     => 0,
+			 '.slogin'  => $username,
+			 '.intl'  => 'us',
+			 '.fUpdate' => '',
+			 '.prelog' => '',
+			 '.bid' => '',
+			 '.aucid' => '',
 			 '.challenge' => $challenge,
 			 '.yplus' => '',
-			 '.emailCode' => '',
+			 '.childID' => '',
 			 'pkg'    => '',
-			 'stepid' => '',
-			 '.ev'    => '',
 			 'hasMsgr' => 0,
-			 '.chkP'  => 'Y',
-			 '.done'  => "http://groups.yahoo.com/group/$group/",
-			 'login'  => $username,
-			 'passwd' => $password,
+			 '.pd'     => $pd,
+			 '.u'     => $u,
 			 '.persistent' => 'y',
+			 'passwd' => $password,
 			 '.save'  => 'Sign In'
 			];
 		
@@ -160,8 +161,6 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 		}
 	
 		$content = $response->content;
-
-		($group_domain) = $url =~ /\/\/(.*?groups.yahoo.com)\//;
 
 		terminate("Couldn't log in $username") if ( !$response->is_success );
 
@@ -212,6 +211,8 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 	}
 }
 
+($group_domain) = $url =~ /\/\/(.*?groups.yahoo.com)\//;
+
 download_folder('');
 
 sub download_folder {
@@ -243,7 +244,7 @@ sub download_folder {
 		my ($cells) = $content =~ /<!-- start content include -->\s+(.+?)\s+<!-- end content include -->/s;
 		while ($cells =~ /<tr>.+?<span class="title">\s+<a href="(.+?)">(.+?)<\/a>\s+<\/span>.+?<\/tr>/sg) {
 			my $file_url = $1;
-			my $file_name = $2;
+			my $file_name = decode_entities($2);
 			next if -f "$group$sub_folder/$file_name";
 			if ($file_url =~ /\/$/) {
 				download_folder("$sub_folder/$file_name");
