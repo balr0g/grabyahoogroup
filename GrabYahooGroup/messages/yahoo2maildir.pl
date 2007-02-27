@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.19 2007-01-28 00:35:28 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.20 2007-02-27 03:07:36 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -125,12 +125,10 @@ my $challenge;
 my $done;
 
 if (!(-f $Cookie_file) or $content =~ /sign\s+in\s+now/i or $content =~ /Sign in to Yahoo/ or $content =~ /Sign in with your ID and password to continue/ or $content =~ /To access\s+Yahoo! Groups...<\/span><br>\s+<strong>Sign in to Yahoo/ or $content =~ /Verify your Yahoo! password to continue/ or $content =~ /sign in<\/a> now/) {
-	($login_rand) = $content =~ /<form method=post action="https:\/\/login.yahoo.com\/config\/login\?(.+?)"/s;
+	($login_rand) = $content =~ /<form method=post action="https:\/\/login.yahoo.com\/config\/login_verify2\?(.*?)"/s;
 	($u) = $content =~ /<input type=hidden name=".u" value="(.+?)" >/s;
 	($challenge) = $content =~ /<input type=hidden name=".challenge" value="(.+?)" >/s;
-        ($done) = $content =~ /.done=(.+?)"/;
-        $done = "http://groups.yahoo.com/group/$group/messages/1" unless $done;
-        $done =~ s/\%([A-Fa-f0-9]{2})/pack('C', hex($1))/eg;
+	($pd) = $content =~ /<input type=hidden name=".pd" value="(.+?)" >/s;
 
 	unless ($username) {
 		my ($slogin) = $content =~ /<input type=hidden name=".slogin" value="(.+?)" >/;
@@ -153,35 +151,34 @@ if (!(-f $Cookie_file) or $content =~ /sign\s+in\s+now/i or $content =~ /Sign in
 		print "\n";
 	}
 
-	$request = POST 'http://login.yahoo.com/config/login',
+	$request = POST 'http://login.yahoo.com/config/login_verify2',
 		[
-		 '.tries' => '1',
 		 '.src'   => 'ygrp',
+		 '.tries' => '1',
+		 '.done'  => "http://groups.yahoo.com/group/$group/",
 		 '.md5'   => '',
 		 '.hash'  => '',
 		 '.js'    => '',
-		 '.last'  => '',
-		 'promo'  => '',
-		 '.intl'  => 'us',
-		 '.bypass' => '',
 		 '.partner' => '',
-		 '.u'     => $u,
-		 '.v'     => 0,
+		 '.slogin'  => $username,
+		 '.intl'  => 'us',
+		 '.fUpdate' => '',
+		 '.prelog' => '',
+		 '.bid' => '',
+		 '.aucid' => '',
 		 '.challenge' => $challenge,
 		 '.yplus' => '',
-		 '.emailCode' => '',
+		 '.childID' => '',
 		 'pkg'    => '',
-		 'stepid' => '',
-		 '.ev'    => '',
 		 'hasMsgr' => 0,
-		 '.chkP'  => 'Y',
-		 '.done'  => $done,
-		 'login'  => $username,
-		 'passwd' => $password,
+		 '.pd'     => $pd,
+		 '.u'     => $u,
 		 '.persistent' => 'y',
+		 'passwd' => $password,
 		 '.save'  => 'Sign In'
 		];
-	
+
+
 	$request->content_type('application/x-www-form-urlencoded');
 	$request->header('Accept' => '*/*');
 	$request->header('Allowed' => 'GET HEAD PUT');
