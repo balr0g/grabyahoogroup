@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/photos/yahoogroups_photos.pl,v 1.7 2007-01-28 00:38:16 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/photos/yahoogroups_photos.pl,v 1.8 2007-03-18 07:09:13 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -11,6 +11,7 @@ use HTTP::Request::Common qw(GET POST);
 use HTTP::Cookies ();
 use LWP::UserAgent ();
 use LWP::Simple ();
+use HTML::Entities;
 sub GetRedirectUrl($);
 
 # By default works in verbose mode unless VERBOSE=0 via environment variable for cron job.
@@ -234,6 +235,8 @@ if ($@) {
 sub download_folder {
 	my ($folder_id, $folder_name) = @_;
 
+	$folder_name = HTML::Entities::decode($folder_name);
+
 	print "[$group]$folder_name\n" if $VERBOSE;
 
 	unless (-d "$group/$folder_name" or mkdir "$group/$folder_name") {
@@ -259,46 +262,78 @@ sub download_folder {
 	}
 	$cookie_jar->extract_cookies($response);
 
+	my $next_album_page = 1;
+	my $browse_item_next = 17;
+
 	my ($content) = $response->content =~ /<!-- start content include -->\n(.+)\n<!-- end content include -->/s;
 
 	my @locators;
 
-	while ($content =~ m!(<a href="/group/$group/photos/browse/\w+">[\w_ -]+</a>)!sg) {
-		push @locators, $1;
-	}
-
-	while ($content =~ m!(<a href="/group/$group/photos/view/\w+\?b=\d+"><img src="http://.+?/__tn_/.+?"></a>)!sg) {
-		push @locators, $1;
-	}
-
-	while ($response->content =~ /<a href="\/group\/$group\/photos\/browse\/$folder_id\?b=(\d+).+?">Next/) {
-		my $next = $1;
-		$request = GET "http://ph.groups.yahoo.com/group/$group/photos/browse/$folder_id?b=$next&m=t";
-		$response = $ua->simple_request($request);
-		if ($response->is_error) {
-			print STDERR "[http://ph.groups.yahoo.com/group/$group/photos/browse/$folder_id?b=$next&m=t] " . $response->as_string . "\n" if $VERBOSE;
-			return;
-		}
-
-		while ( $response->is_redirect ) {
-			$cookie_jar->extract_cookies($response);
-			$url = GetRedirectUrl($response);
-			$request = GET $url;
-			$response = $ua->simple_request($request);
-			if ($response->is_error) {
-				print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
-				return;
-			}
-		}
-		$cookie_jar->extract_cookies($response);
-
-		($content) = $response->content =~ /<!-- start content include -->\n(.+)\n<!-- end content include -->/s;
-
-		while ($content =~ m!(<a href="/group/$group/photos/browse/\w+">[\w_ -]+<\/a>)!sg) {
+	while ($next_album_page) {
+		while ($content =~ m!(<a href="/group/$group/photos/browse/\w+">[^<]+</a>)!sg) {
 			push @locators, $1;
 		}
+
+		$next_album_page = 0 if ($response->content !~ m!<a href="/group/$group/photos/browse\?b=$browse_item_next!sg);
+
 		while ($content =~ m!(<a href="/group/$group/photos/view/\w+\?b=\d+"><img src="http://.+?/__tn_/.+?"></a>)!sg) {
 			push @locators, $1;
+		}
+
+		while ($response->content =~ /<a href="\/group\/$group\/photos\/browse\/$folder_id\?b=(\d+).+?">Next/) {
+			my $next = $1;
+			$request = GET "http://ph.groups.yahoo.com/group/$group/photos/browse/$folder_id?b=$next&m=t";
+			$response = $ua->simple_request($request);
+			if ($response->is_error) {
+				print STDERR "[http://ph.groups.yahoo.com/group/$group/photos/browse/$folder_id?b=$next&m=t] " . $response->as_string . "\n" if $VERBOSE;
+				return;
+			}
+
+			while ( $response->is_redirect ) {
+				$cookie_jar->extract_cookies($response);
+				$url = GetRedirectUrl($response);
+				$request = GET $url;
+				$response = $ua->simple_request($request);
+				if ($response->is_error) {
+					print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
+					return;
+				}
+			}
+			$cookie_jar->extract_cookies($response);
+
+			($content) = $response->content =~ /<!-- start content include -->\n(.+)\n<!-- end content include -->/s;
+
+			while ($content =~ m!(<a href="/group/$group/photos/browse/\w+">[^<]+<\/a>)!sg) {
+				push @locators, $1;
+			}
+			while ($content =~ m!(<a href="/group/$group/photos/view/\w+\?b=\d+"><img src="http://.+?/__tn_/.+?"></a>)!sg) {
+				push @locators, $1;
+			}
+		}
+
+		if ($next_album_page) {
+			$request = GET "http://ph.groups.yahoo.com/group/$group/photos/browse\?b=$browse_item_next&m=t";
+			$response = $ua->simple_request($request);
+			if ($response->is_error) {
+				print STDERR "[http://ph.groups.yahoo.com/group/$group/photos/browse\?b=$browse_item_next&m=t] " . $response->as_string . "\n" if $VERBOSE;
+				return;
+			}
+
+			while ( $response->is_redirect ) {
+				$cookie_jar->extract_cookies($response);
+				$url = GetRedirectUrl($response);
+				$request = GET $url;
+				$response = $ua->simple_request($request);
+				if ($response->is_error) {
+					print STDERR "[$url] " . $response->as_string . "\n" if $VERBOSE;
+					return;
+				}
+			}
+			$cookie_jar->extract_cookies($response);
+
+			($content) = $response->content =~ /<!-- start content include -->\n(.+)\n<!-- end content include -->/s;
+
+			$browse_item_next += 16;
 		}
 	}
 
