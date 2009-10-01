@@ -1,10 +1,11 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.11 2007-02-21 01:00:34 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.12 2009-10-01 05:09:09 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
 use strict;
+use utf8;
 
 use Crypt::SSLeay;
 use HTTP::Request::Common qw(GET POST);
@@ -16,6 +17,9 @@ use HTML::Entities;
 
 # By default works in verbose mode unless VERBOSE=0 via environment variable for cron job.
 my $VERBOSE = 1;
+
+# There is always something breaking - might as well have a file to email out
+my $DEBUG = 1;
 
 my $GETADULT = 1; # Allow adult groups to be downloaded.
 
@@ -78,12 +82,14 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 	
 	while ( $response->is_redirect ) {
 		$cookie_jar->extract_cookies($response);
+		$cookie_jar->save if $COOKIE_SAVE;
 		$url = GetRedirectUrl($response);
 		$request = GET $url;
 		$response = $ua->simple_request($request);
 		terminate("[$url] " . $response->as_string) if ($response->is_error);
 	}
 	$cookie_jar->extract_cookies($response);
+	$cookie_jar->save if $COOKIE_SAVE;
 	
 	$content = $response->content;
 	
@@ -92,22 +98,47 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 	my $challenge;
 	my $pd;
 	
-	if ($content =~ /Sign in to Yahoo/ or $content =~ /Sign in with your ID and password to continue/ or $content =~ /Verify your Yahoo! password to continue/) {
-		($login_rand) = $content =~ /<form method=post action="https:\/\/login.yahoo.com\/config\/login_verify2\?(.*?)"/s;
-		($u) = $content =~ /<input type=hidden name=".u" value="(.+?)" >/s;
-		($challenge) = $content =~ /<input type=hidden name=".challenge" value="(.+?)" >/s;
-		($pd) = $content =~ /<input type=hidden name=".pd" value="(.+?)" >/s;
-
-		unless ($username) {
-			my ($slogin) = $content =~ /<input type=hidden name=".slogin" value="(.+?)" >/;
-			$username = $slogin if $slogin;
+	if ($content =~ /Login Form/) {
+		my ($login_url) = $content =~ m!<form method="post" action="(.+?login\.yahoo.+?)"!s;
+		unless ($login_url) {
+			if ($DEBUG) {
+				open(DEBUG, '> content.html') or die "content.html:$!\n";
+				print FD $content;
+				close FD;
+			}
+			terminate("Can't isolate login URL - please email the content.html file to author if one is available");
 		}
+
+		my ($form) = $content =~ m!<form method="post" action=".+?login\.yahoo.+?".+?>(.+?)</form>!s;
+		unless ($form) {
+			if ($DEBUG) {
+				open(DEBUG, '> content.html') or die "content.html:$!\n";
+				print FD $content;
+				close FD;
+			}
+			terminate("Can't isolate login form - please email the content.html file to author if one is available");
+		}
+
+		my %form_fields;
+
+		while ($form =~ m!<input type=(.+?)>!sg) {
+			my $input = $1;
+			my ($name) = $input =~ m!name="*(.+?)[" ]!;
+			my ($value) = $input =~ m!value="*(.*?)[" ]!;
+			$form_fields{$name} = $value;
+		}
+
+		my $slogin = $form_fields{'.slogin'};
+		$username = $slogin if $slogin;
 	
 		unless ($username) {
 			print "Enter username : ";
 			$username = <STDIN>;
 			chomp $username;
 		}
+		$form_fields{'login'} = $username if $form_fields{'login'};
+		$form_fields{'.slogin'} = $username if $form_fields{'.slogin'};
+		$form_fields{'login'} = $username unless ($form_fields{'login'} or $form_fields{'.slogin'});
 	
 		unless ($password) {
 			use Term::ReadKey;
@@ -118,46 +149,49 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 			chomp $password;
 			print "\n";
 		}
+		$form_fields{'passwd'} = $password;
 	
-		$request = POST 'http://login.yahoo.com/config/login_verify2',
-			[
-			 '.src'   => 'ygrp',
-			 '.tries' => '1',
-			 '.done'  => "http://groups.yahoo.com/group/$group/",
-			 '.md5'   => '',
-			 '.hash'  => '',
-			 '.js'    => '',
-			 '.partner' => '',
-			 '.slogin'  => $username,
-			 '.intl'  => 'us',
-			 '.fUpdate' => '',
-			 '.prelog' => '',
-			 '.bid' => '',
-			 '.aucid' => '',
-			 '.challenge' => $challenge,
-			 '.yplus' => '',
-			 '.childID' => '',
-			 'pkg'    => '',
-			 'hasMsgr' => 0,
-			 '.pd'     => $pd,
-			 '.u'     => $u,
-			 '.persistent' => 'y',
-			 'passwd' => $password,
-			 '.save'  => 'Sign In'
-			];
+		$request = POST $login_url, [ %form_fields ];
 		
 		$request->content_type('application/x-www-form-urlencoded');
 		$request->header('Accept' => '*/*');
 		$request->header('Allowed' => 'GET HEAD PUT');
 		$response = $ua->simple_request($request);
 		terminate("[http://login.yahoo.com/config/login] " . $response->as_string) if ($response->is_error);
+		#Generic login loop
 		while ( $response->is_redirect ) {
 			$cookie_jar->extract_cookies($response);
+			$cookie_jar->save if $COOKIE_SAVE;
 			$url = GetRedirectUrl($response);
 			$request = GET $url;
 			$response = $ua->simple_request($request);
 			terminate("[$url] " . $response->as_string) if ($response->is_error);
 			$cookie_jar->extract_cookies($response);
+			$cookie_jar->save if $COOKIE_SAVE;
+		}
+	
+		# JS Redirect if login successful
+		while ( isJSRedirect($response) ) {
+			$cookie_jar->extract_cookies($response);
+			$cookie_jar->save if $COOKIE_SAVE;
+			$url = GetJSRedirect($response);
+			$request = GET $url;
+			$response = $ua->simple_request($request);
+			terminate("[$url] " . $response->as_string) if ($response->is_error);
+			$cookie_jar->extract_cookies($response);
+			$cookie_jar->save if $COOKIE_SAVE;
+		}
+	
+		# Adult confirmation redirect
+		while ( $response->is_redirect ) {
+			$cookie_jar->extract_cookies($response);
+			$cookie_jar->save if $COOKIE_SAVE;
+			$url = GetRedirectUrl($response);
+			$request = GET $url;
+			$response = $ua->simple_request($request);
+			terminate("[$url] " . $response->as_string) if ($response->is_error);
+			$cookie_jar->extract_cookies($response);
+			$cookie_jar->save if $COOKIE_SAVE;
 		}
 	
 		$content = $response->content;
@@ -193,11 +227,13 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 		
 			while ( $response->is_redirect ) {
 				$cookie_jar->extract_cookies($response);
+				$cookie_jar->save if $COOKIE_SAVE;
 				$url = GetRedirectUrl($response);
 				$request = GET $url;
 				$response = $ua->simple_request($request);
 				terminate("[$url] " . $response->as_string) if ($response->is_error);
 				$cookie_jar->extract_cookies($response);
+				$cookie_jar->save if $COOKIE_SAVE;
 			}
 	
 			$content = $response->content;
@@ -219,7 +255,7 @@ sub download_folder {
 	my ($sub_folder) = @_;
 	# print "[$group]$sub_folder\n" if $VERBOSE;
 
-	terminate("$! : $group$sub_folder") unless (-d "$group$sub_folder" or mkdir "$group$sub_folder");
+	terminate("$! : $group$sub_folder") unless (-d $group . $sub_folder or mkdir $group . $sub_folder);
 
 	$request = GET "http://$group_domain/group/$group/files$sub_folder/";
 	$response = $ua->simple_request($request);
@@ -227,12 +263,14 @@ sub download_folder {
 	
 	while ( $response->is_redirect ) {
 		$cookie_jar->extract_cookies($response);
+		$cookie_jar->save if $COOKIE_SAVE;
 		$url = GetRedirectUrl($response);
 		$request = GET $url;
 		$response = $ua->simple_request($request);
 		terminate("[$url] " . $response->as_string) if ($response->is_error);
 	}
 	$cookie_jar->extract_cookies($response);
+	$cookie_jar->save if $COOKIE_SAVE;
 	
 	$content = $response->content;
 	
@@ -240,29 +278,32 @@ sub download_folder {
 		terminate("Yahoo error : not a member of this group") if $content =~ /You are not a member of the group /;
 		terminate("Yahoo error : nonexistant group") if $content =~ /There is no group called /;
 		terminate("Yahoo error : database unavailable") if $content =~ /The database is unavailable at the moment/;
-		next if $content =~ /This folder is empty/;
+		return if $content =~ /This folder is empty/;
 		my ($cells) = $content =~ /<!-- start content include -->\s+(.+?)\s+<!-- end content include -->/s;
 		while ($cells =~ /<tr>.+?<span class="title">\s+<a href="(.+?)">(.+?)<\/a>\s+<\/span>.+?<\/tr>/sg) {
 			my $file_url = $1;
 			my $file_name = decode_entities($2);
-			next if -f "$group$sub_folder/$file_name";
+			utf8::encode($file_name) unless utf8::is_utf8($file_name);
+			next if -e $group . $sub_folder . '/' . $file_name;
 			if ($file_url =~ /\/$/) {
 				download_folder("$sub_folder/$file_name");
 				next;
 			}
-			print "$group $sub_folder/$file_name\n" if $VERBOSE;
+			print "[$group]$sub_folder/$file_name\n" if $VERBOSE;
 	
 			$request = GET $file_url;
 			$response = $ua->simple_request($request);
 			terminate("\n\t[$file_url] " . $response->as_string) if ($response->is_error);
 			while ( $response->is_redirect ) {
 				$cookie_jar->extract_cookies($response);
+				$cookie_jar->save if $COOKIE_SAVE;
 				$url = GetRedirectUrl($response);
 				$request = GET $url;
 				$response = $ua->simple_request($request);
 				terminate("\n\t[$url] " . $response->as_string) if ($response->is_error);
 			}
 			$cookie_jar->extract_cookies($response);
+			$cookie_jar->save if $COOKIE_SAVE;
 			$content = $response->content;
 			# If the page comes up with just a advertizement without the message.
 			if ($content =~ /Continue to message/s) {
@@ -272,6 +313,7 @@ sub download_folder {
 				$content = $response->content;
 			}
 			$cookie_jar->extract_cookies($response);
+			$cookie_jar->save if $COOKIE_SAVE;
 
 			terminate("Yahoo error : group download limit exceeded") if (($content =~ /The document you requested is temporarily unavailable because this group\s+has exceeded its download limit/s) and $VERBOSE);
 			if (($content =~ /The document you requested is temporarily unavailable because you\s+has exceeded its download limit/s) and $VERBOSE) {
@@ -314,3 +356,25 @@ sub GetRedirectUrl {
 
 	return $url;
 }
+
+sub isJSRedirect {
+	my ($response) = @_;
+	return 1 if $response->content() =~ m!location.replace!s;
+}
+
+sub GetJSRedirect {
+	my ($response) = @_;
+
+	my ($redirect) = $response->content() =~ m!location.replace\(['"]*(.+?)['"]*\)!s;
+
+	return unless $redirect;
+
+	# the Location URL is sometimes non-absolute which is not allowed, fix it
+	local $URI::ABS_ALLOW_RELATIVE_SCHEME = 1;
+	my $base = $response->base;
+	my $url = $HTTP::URI_CLASS->new($redirect, $base)->abs($base);
+
+	return $url;
+}
+
+
