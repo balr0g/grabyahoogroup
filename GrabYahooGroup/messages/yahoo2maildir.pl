@@ -1,17 +1,22 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.20 2007-02-27 03:07:36 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/messages/yahoo2maildir.pl,v 1.21 2009-10-04 03:54:04 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
 use strict;
+use utf8;
 
 use Crypt::SSLeay;
 use HTTP::Request::Common qw(GET POST);
 use HTTP::Cookies ();
 use LWP::UserAgent ();
 use LWP::Simple ();
+use Getopt::Long;
 use HTML::Entities;
+use Encode;
+
+binmode(STDOUT,':utf8');
 
 my $attachment_nobody = q{<br>
 <i>[Attachment content not displayed.]</i><br><br>
@@ -20,12 +25,14 @@ my $attachment_nobody = q{<br>
 
 # By default works in verbose mode unless VERBOSE=0 via environment variable for cron job.
 my $VERBOSE = 1;
-$VERBOSE = $ENV{'VERBOSE'} if $ENV{'VERBOSE'};
+
+# There is always something breaking - might as well have a file to email out
+my $DEBUG = 1;
+
+my $GETADULT = 1; # Allow adult groups to be downloaded.
 
 my $SAVEALL = 0; # Force download every file even if the file exists locally.
 my $REFRESH = 1; # Download only those messages which dont already exist.
-
-my $GETADULT = 1; # Allow adult groups to be downloaded.
 
 my $COOKIE_SAVE = 1; # Save cookies before finishing - wont if aborted.
 my $COOKIE_LOAD = 1; # Load cookies if saved from previous session.
@@ -35,21 +42,35 @@ my $HUMAN_REFLEX = 5; # Amount of time it would take a human being to react to a
 
 $| = 1 if ($VERBOSE); # Want to see the messages immediately if I am in verbose mode
 
-my $username = ''; # Better here than the commandline.
-my $password = $ENV{'GY_PASSWD'};
-$password = '' unless $password; # Better here than the commandline.
+my $username = '';
+my $password = '';
+my $HTTP_PROXY_URL = ''; # Proxy server if any http://hostname:port/
 my $TIMEOUT = 10; # Connection timeout changed from default 3 min for slow connection/server
 my $USER_AGENT = 'GrabYahoo/1.00'; # Changing this value is probably unethical at the least and possible illegal at the worst
+
 my $cycle = 1; # Every block cycle
+
 my $group_domain;
 
 my $sleep_duration = 0;
+
+my $result = GetOptions ('verbose=i' => \$VERBOSE,
+			 'getadult=i' => \$GETADULT,
+			 'cookie_save=i' => \$COOKIE_SAVE,
+			 'cookie_load=i' => \$COOKIE_LOAD,
+			 'username=s' => \$username,
+			 'password=s' => \$password,
+			 'http_proxy=s' => \$HTTP_PROXY_URL,
+			 'timeout=i' => \$TIMEOUT,
+			 'user_agent=s' => \$USER_AGENT);
+
+$| = 1 if ($VERBOSE); # Want to see the messages immediately if I am in verbose mode
 
 my ($user_group, $bmsg, $emsg) = @ARGV;
 
 terminate("Please specify a group to process") unless $user_group;
 
-my $begin_msgid;
+my $begin_msgid = 1;
 my $end_msgid;
 
 if (defined $bmsg) {
@@ -85,6 +106,7 @@ my $Cookie_file = "$group/yahoogroups.cookies";
 
 my $ua = LWP::UserAgent->new(keep_alive => 10);
 $ua->env_proxy();
+$ua->proxy('http', $HTTP_PROXY_URL) if $HTTP_PROXY_URL;
 $ua->agent($USER_AGENT);
 $ua->timeout($TIMEOUT*60);
 print STDERR "[INFO] Setting timeout to : " . $ua->timeout() . "\n" if $VERBOSE;
@@ -92,7 +114,7 @@ my $cookie_jar = HTTP::Cookies->new( 'file' => $Cookie_file );
 $ua->cookie_jar($cookie_jar);
 my $request;
 my $response;
-my $url = "http://groups.yahoo.com/group/$group/messages/1";
+my $url = "http://login.yahoo.com/config/login?.done=http://groups.yahoo.com/group/$group/messages/$begin_msgid";
 my $content;
 if ($COOKIE_LOAD and -f $Cookie_file) {
 	$cookie_jar->load();
@@ -101,12 +123,13 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 $request = GET $url;
 $response = $ua->simple_request($request);
 if ($response->is_error) {
-	print STDERR "[ERR] [http://groups.yahoo.com/group/$group/messages/1] " . $response->as_string . "\n" if $VERBOSE;
+	print STDERR "[ERR] [$url] " . $response->as_string . "\n" if $VERBOSE;
 	exit;
 }
 
 while ( $response->is_redirect ) {
 	$cookie_jar->extract_cookies($response);
+	$cookie_jar->save if $COOKIE_SAVE;
 	$url = GetRedirectUrl($response);
 	$request = GET $url;
 	$response = $ua->simple_request($request);
@@ -116,30 +139,51 @@ while ( $response->is_redirect ) {
 	}
 }
 $cookie_jar->extract_cookies($response);
+$cookie_jar->save if $COOKIE_SAVE;
 
 $content = $response->content;
 
-my $login_rand;
-my $u;
-my $challenge;
-my $done;
-
-if (!(-f $Cookie_file) or $content =~ /sign\s+in\s+now/i or $content =~ /Sign in to Yahoo/ or $content =~ /Sign in with your ID and password to continue/ or $content =~ /To access\s+Yahoo! Groups...<\/span><br>\s+<strong>Sign in to Yahoo/ or $content =~ /Verify your Yahoo! password to continue/ or $content =~ /sign in<\/a> now/) {
-	($login_rand) = $content =~ /<form method=post action="https:\/\/login.yahoo.com\/config\/login_verify2\?(.*?)"/s;
-	($u) = $content =~ /<input type=hidden name=".u" value="(.+?)" >/s;
-	($challenge) = $content =~ /<input type=hidden name=".challenge" value="(.+?)" >/s;
-	($pd) = $content =~ /<input type=hidden name=".pd" value="(.+?)" >/s;
-
-	unless ($username) {
-		my ($slogin) = $content =~ /<input type=hidden name=".slogin" value="(.+?)" >/;
-		$username = $slogin if $slogin;
+if ($content =~ /Login Form/) {
+	my ($login_url) = $content =~ m!<form method="post" action="(.+?login\.yahoo.+?)"!s;
+	unless ($login_url) {
+		if ($DEBUG) {
+			open(DEBUG, '> content.html') or die "content.html:$!\n";
+			print FD $content;
+			close FD;
+		}
+		terminate("Can't isolate login URL - please email the content.html file to author if one is available");
 	}
+
+	my ($form) = $content =~ m!<form method="post" action=".+?login\.yahoo.+?".+?>(.+?)</form>!s;
+	unless ($form) {
+		if ($DEBUG) {
+			open(DEBUG, '> content.html') or die "content.html:$!\n";
+			print FD $content;
+			close FD;
+		}
+		terminate("Can't isolate login form - please email the content.html file to author if one is available");
+	}
+
+	my %form_fields;
+
+	while ($form =~ m!<input type=(.+?)>!sg) {
+		my $input = $1;
+		my ($name) = $input =~ m!name="*(.+?)[" ]!;
+		my ($value) = $input =~ m!value="*(.*?)[" ]!;
+		$form_fields{$name} = $value;
+	}
+
+	my $slogin = $form_fields{'.slogin'};
+	$username = $slogin if $slogin;
 
 	unless ($username) {
 		print "Enter username : ";
 		$username = <STDIN>;
 		chomp $username;
 	}
+	$form_fields{'login'} = $username if $form_fields{'login'};
+	$form_fields{'.slogin'} = $username if $form_fields{'.slogin'};
+	$form_fields{'login'} = $username unless ($form_fields{'login'} or $form_fields{'.slogin'});
 
 	unless ($password) {
 		use Term::ReadKey;
@@ -150,122 +194,102 @@ if (!(-f $Cookie_file) or $content =~ /sign\s+in\s+now/i or $content =~ /Sign in
 		chomp $password;
 		print "\n";
 	}
+	$form_fields{'passwd'} = $password;
 
-	$request = POST 'http://login.yahoo.com/config/login_verify2',
-		[
-		 '.src'   => 'ygrp',
-		 '.tries' => '1',
-		 '.done'  => "http://groups.yahoo.com/group/$group/",
-		 '.md5'   => '',
-		 '.hash'  => '',
-		 '.js'    => '',
-		 '.partner' => '',
-		 '.slogin'  => $username,
-		 '.intl'  => 'us',
-		 '.fUpdate' => '',
-		 '.prelog' => '',
-		 '.bid' => '',
-		 '.aucid' => '',
-		 '.challenge' => $challenge,
-		 '.yplus' => '',
-		 '.childID' => '',
-		 'pkg'    => '',
-		 'hasMsgr' => 0,
-		 '.pd'     => $pd,
-		 '.u'     => $u,
-		 '.persistent' => 'y',
-		 'passwd' => $password,
-		 '.save'  => 'Sign In'
-		];
-
-
+	$request = POST $login_url, [ %form_fields ];
+	
 	$request->content_type('application/x-www-form-urlencoded');
 	$request->header('Accept' => '*/*');
 	$request->header('Allowed' => 'GET HEAD PUT');
-	$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-	print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if ($VERBOSE and $sleep_duration);
-	sleep($sleep_duration);
 	$response = $ua->simple_request($request);
-	if ($response->is_error) {
-		print STDERR "[ERR] [http://login.yahoo.com/config/login] " . $response->as_string . "\n" if $VERBOSE;
-		exit;
-	}
+	terminate("[http://login.yahoo.com/config/login] " . $response->as_string) if ($response->is_error);
+	#Generic login loop
 	while ( $response->is_redirect ) {
 		$cookie_jar->extract_cookies($response);
+		$cookie_jar->save if $COOKIE_SAVE;
 		$url = GetRedirectUrl($response);
 		$request = GET $url;
 		$response = $ua->simple_request($request);
-		if ($response->is_error) {
-			print STDERR "[ERR] [$url] " . $response->as_string . "\n" if $VERBOSE;
-			exit;
-		}
+		terminate("[$url] " . $response->as_string) if ($response->is_error);
 		$cookie_jar->extract_cookies($response);
+		$cookie_jar->save if $COOKIE_SAVE;
+	}
+
+	# JS Redirect if login successful
+	while ( isJSRedirect($response) ) {
+		$cookie_jar->extract_cookies($response);
+		$cookie_jar->save if $COOKIE_SAVE;
+		$url = GetJSRedirect($response);
+		$request = GET $url;
+		$response = $ua->simple_request($request);
+		terminate("[$url] " . $response->as_string) if ($response->is_error);
+		$cookie_jar->extract_cookies($response);
+		$cookie_jar->save if $COOKIE_SAVE;
+	}
+
+	# Adult confirmation redirect
+	while ( $response->is_redirect ) {
+		$cookie_jar->extract_cookies($response);
+		$cookie_jar->save if $COOKIE_SAVE;
+		$url = GetRedirectUrl($response);
+		$request = GET $url;
+		$response = $ua->simple_request($request);
+		terminate("[$url] " . $response->as_string) if ($response->is_error);
+		$cookie_jar->extract_cookies($response);
+		$cookie_jar->save if $COOKIE_SAVE;
 	}
 
 	$content = $response->content;
 
 	terminate("Couldn't log in $username") if ( !$response->is_success );
-
 	terminate("Wrong password entered for $username") if ( $content =~ /Invalid Password/ );
-
 	terminate("Yahoo user $username does not exist") if ( $content =~ /ID does not exist/ );
+	terminate("Yahoo error : not a member of this group") if $content =~ /You are not a member of the group /;
+	terminate("Yahoo error : nonexistant group") if $content =~ /There is no group called /;
+	terminate("Yahoo error : database unavailable") if $content =~ /The database is unavailable at the moment/;
 
-	print STDERR "[INFO] Successfully logged in as $username.\n" if $VERBOSE; 
-
+	print "Successfully logged in as $username.\n" if $VERBOSE; 
+	
 	$cookie_jar->save if $COOKIE_SAVE;
 }
 
-
 if (($content =~ /You've reached an Age-Restricted Area of Yahoo! Groups/) or ($content =~ /you have reached an age-restricted area of Yahoo! Groups/)) {
 	if ($GETADULT) {
-                my ($ycb) = $content =~ /<input type="hidden" name="ycb" value="(.+?)">/;
-                my ($dest) = $content =~ /<input type="hidden" name="dest" value="(.+?)">/;
+		my ($ycb) = $content =~ /<input type="hidden" name="ycb" value="(.+?)">/;
+		my ($dest) = $content =~ /<input type="hidden" name="dest" value="(.+?)">/;
 		$request = POST 'http://groups.yahoo.com/adultconf',
 			[
 			 'ref' => '',
-			 'dest'  => $dest,
-                         'ycb' => $ycb,
+			 'dest' => $dest,
+			 'ycb' => $ycb,
 			 'accept' => 'I Accept'
 			];
 	
 		$request->content_type('application/x-www-form-urlencoded');
 		$request->header('Accept' => '*/*');
 		$request->header('Allowed' => 'GET HEAD PUT');
-		$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-		print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if ($VERBOSE and $sleep_duration);
-		sleep($sleep_duration);
 		$response = $ua->simple_request($request);
-		if ($response->is_error) {
-			print STDERR "[ERR] [http://groups.yahoo.com/adultconf] " . $response->as_string . "\n" if $VERBOSE;
-			exit;
-		}
-		$cookie_jar->extract_cookies($response);
+		terminate("[http://groups.yahoo.com/adultconf] " . $response->as_string) if ($response->is_error);
 	
 		while ( $response->is_redirect ) {
+			$cookie_jar->extract_cookies($response);
+			$cookie_jar->save if $COOKIE_SAVE;
 			$url = GetRedirectUrl($response);
 			$request = GET $url;
 			$response = $ua->simple_request($request);
-			if ($response->is_error) {
-				print STDERR "[ERR] [$url] " . $response->as_string . "\n" if $VERBOSE;
-				exit;
-			}
+			terminate("[$url] " . $response->as_string) if ($response->is_error);
 			$cookie_jar->extract_cookies($response);
+			$cookie_jar->save if $COOKIE_SAVE;
 		}
 
 		$content = $response->content;
 	
-		print STDERR "[INFO] Confirmed as a adult\n" if $VERBOSE;
-
+		print "Confirmed as a adult\n" if $VERBOSE;
+	
 		$cookie_jar->save if $COOKIE_SAVE;
 	} else {
-		print STDERR "[ERR] This is a adult group exiting\n" if $VERBOSE;
-		exit;
+		terminate("This is a adult group exiting");
 	}
-}
-
-if ($content =~ /You are not a member of the group <b>$group/) {
-	print STDERR "[ERR] Not a member of the group $group\n";
-	exit;
 }
 
 ($group_domain) = $url =~ /\/\/(.*?groups.yahoo.com)\//;
@@ -275,10 +299,10 @@ eval {
 	while ($content =~ /Unfortunately, we are unable to process your request at this time/i) {
 		print STDERR "[WARN] [" . $request->uri . "] Yahoo has blocked us ?\n" if $VERBOSE;
 		$sleep_duration = 3600*$cycle;
-		print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if ($VERBOSE and $sleep_duration);
+		print STDERR " .... sleep $sleep_duration .... " if ($VERBOSE and $sleep_duration);
 		sleep($sleep_duration);
 		$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-		print STDERR "[INFO] [Sleeping for $sleep_duration seconds]\n" if ($VERBOSE and $sleep_duration);
+		print STDERR " .... sleep $sleep_duration .... " if ($VERBOSE and $sleep_duration);
 		sleep($sleep_duration);
 		$response = $ua->simple_request($request);
 		if ($response->is_error) {
@@ -286,6 +310,7 @@ eval {
 			exit;
 		}
 		$cookie_jar->extract_cookies($response);
+		$cookie_jar->save if $COOKIE_SAVE;
 		while ( $response->is_redirect ) {
 			$url = GetRedirectUrl($response);
 			$request = GET $url;
@@ -295,11 +320,13 @@ eval {
 				exit;
 			}
 			$cookie_jar->extract_cookies($response);
+			$cookie_jar->save if $COOKIE_SAVE;
 		}
 		$content = $response->content;
 		$cycle++;
 	}
-	my ($b, $e) = $content =~ /(\d+)-\d+ of (\d+) /;
+	$content =~ s!<.+?>!!gs;
+	my ($b, $e) = $content =~ /(\d+)-\d+ \w+ (\d+)/;
 	terminate("Couldn't get message count") unless $e;
 	$begin_msgid = $b unless $begin_msgid;
 	$end_msgid = $e unless $end_msgid;
@@ -319,7 +346,7 @@ eval {
 		$url = "http://$group_domain/group/$group/message/$messageid?source=1\&unwrap=1";
 		$request = GET $url;
 		$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-		print STDERR "\n[INFO] [Sleeping for $sleep_duration seconds]\t" if ($VERBOSE and $sleep_duration);
+		print STDERR ".... sleep $sleep_duration .... " if ($VERBOSE and $sleep_duration);
 		sleep($sleep_duration);
 		$response = $ua->simple_request($request);
 		if ($response->is_error) {
@@ -327,6 +354,7 @@ eval {
 			exit;
 		}
 		$cookie_jar->extract_cookies($response);
+		$cookie_jar->save if $COOKIE_SAVE;
 		while ( $response->is_redirect ) {
 			$url = GetRedirectUrl($response);
 			$request = GET $url;
@@ -336,6 +364,7 @@ eval {
 				exit;
 			}
 			$cookie_jar->extract_cookies($response);
+			$cookie_jar->save if $COOKIE_SAVE;
 		}
 		$content = $response->content;
 
@@ -344,12 +373,12 @@ eval {
 		while ($content =~ /Unfortunately, we are unable to process your request at this time/i) {
 			print STDERR "[WARN] [http://$group_domain/group/$group/message/$messageid?source=1\&unwrap=1] Yahoo has blocked us ?\n" if $VERBOSE;
 			$sleep_duration = 3600*$cycle;
-			print STDERR "\n[INFO] [Sleeping for $sleep_duration seconds]\t" if ($VERBOSE and $sleep_duration);
+			print STDERR " .... sleep $sleep_duration .... " if ($VERBOSE and $sleep_duration);
 			sleep($sleep_duration);
 			$url = "http://$group_domain/group/$group/message/$messageid?source=1\&unwrap=1";
 			$request = GET $url;
 			$sleep_duration = $HUMAN_WAIT + int(rand($HUMAN_REFLEX));
-			print STDERR "\n[INFO] [Sleeping for $sleep_duration seconds]\t" if ($VERBOSE and $sleep_duration);
+			print STDERR " .... sleep $sleep_duration .... " if ($VERBOSE and $sleep_duration);
 			sleep($sleep_duration);
 			$response = $ua->simple_request($request);
 			if ($response->is_error) {
@@ -357,6 +386,7 @@ eval {
 				exit;
 			}
 			$cookie_jar->extract_cookies($response);
+			$cookie_jar->save if $COOKIE_SAVE;
 			while ( $response->is_redirect ) {
 				$url = GetRedirectUrl($response);
 				$request = GET $url;
@@ -366,13 +396,14 @@ eval {
 					exit;
 				}
 				$cookie_jar->extract_cookies($response);
+				$cookie_jar->save if $COOKIE_SAVE;
 			}
 			$content = $response->content;
 			$cycle++;
 		}
 
 		# If the page comes up with just a advertizement without the message.
-		if ($content =~ /Yahoo! Groups is an advertising supported service/ or $content =~ /Continue to message/s) {
+		if ($content =~ /Yahoo! Groups is an advertising supported service/ or $content =~ /Continue to message/s or $content =~ m!href="/group/$group/message/$messageid!) {
 			$url = "http://$group_domain/group/$group/message/$messageid?source=1\&unwrap=1";
 			$request = GET $url;
 			$response = $ua->simple_request($request);
@@ -381,6 +412,7 @@ eval {
 				exit;
 			}
 			$cookie_jar->extract_cookies($response);
+			$cookie_jar->save if $COOKIE_SAVE;
 			while ( $response->is_redirect ) {
 				$url = GetRedirectUrl($response);
 				$request = GET $url;
@@ -390,13 +422,14 @@ eval {
 					exit;
 				}
 				$cookie_jar->extract_cookies($response);
+				$cookie_jar->save if $COOKIE_SAVE;
 			}
 			$content = $response->content;
 		}
 
 		# If the page has been purged from the system
-		if ($content =~ /Message $messageid does not exist in $group/s) {
-			print "\tmessage purged from the system\n" if $VERBOSE;
+		if ($content =~ /Message ($messageid)? does not exist in $group/s) {
+			print "[PURGED]\n" if $VERBOSE;
 			open (MFD, "> $group/$messageid");
 			close MFD;
 			next;
@@ -404,7 +437,13 @@ eval {
 
 		my ($email_content) = $content =~ /<!-- start content include -->\s(.+?)\s<!-- end content include -->/s;
 
-		my ($email_header, $email_body) = $email_content =~ /<td class="source user">\s+(From .+?)\s+<br>\s+<br>\s+(.+)<\/td>/s;
+		my ($email_header, $email_body) = $email_content =~ m!<td class="source user">\s+(From .+?)\s+<br>\s+<br>\s+(.+)</td>!s;
+		unless ($email_body) {
+			print "[potentially PURGED]\n" if $VERBOSE;
+			open (MFD, "> $group/$messageid");
+			close MFD;
+			next;
+		}
 		if ($email_body eq $attachment_nobody) {
 			print "... body contains attachment with no body\n";
 			open (MFD, "> $group/$messageid");
@@ -423,7 +462,10 @@ eval {
 		print MFD "\n\n";
 		print MFD $email_body;
 		close MFD;
-		print "\n" if $VERBOSE;
+
+		my ($subject) = $email_header =~ /Subject: (.+?)\s+[\w-]+:/s;
+		$subject = Encode::decode('MIME-Header', $subject);
+		print "$subject\n" if $VERBOSE;
 
 		$cookie_jar->save if $COOKIE_SAVE;
 	}
@@ -451,6 +493,26 @@ sub GetRedirectUrl {
 	local $URI::ABS_ALLOW_RELATIVE_SCHEME = 1;
 	my $base = $response->base;
 	$url = $HTTP::URI_CLASS->new($url, $base)->abs($base);
+
+	return $url;
+}
+
+sub isJSRedirect {
+	my ($response) = @_;
+	return 1 if $response->content() =~ m!location.replace!s;
+}
+
+sub GetJSRedirect {
+	my ($response) = @_;
+
+	my ($redirect) = $response->content() =~ m!location.replace\(['"]*(.+?)['"]*\)!s;
+
+	return unless $redirect;
+
+	# the Location URL is sometimes non-absolute which is not allowed, fix it
+	local $URI::ABS_ALLOW_RELATIVE_SCHEME = 1;
+	my $base = $response->base;
+	my $url = $HTTP::URI_CLASS->new($redirect, $base)->abs($base);
 
 	return $url;
 }
