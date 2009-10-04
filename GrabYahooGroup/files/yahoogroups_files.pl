@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.12 2009-10-01 05:09:09 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.13 2009-10-04 04:35:28 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -58,7 +58,8 @@ my $Cookie_file = "$group/yahoogroups.cookies";
 
 # Logon to Yahoo
 
-my $ua = LWP::UserAgent->new;
+my $ua = LWP::UserAgent->new(keep_alive => 10);
+$ua->env_proxy();
 $ua->proxy('http', $HTTP_PROXY_URL) if $HTTP_PROXY_URL;
 $ua->agent($USER_AGENT);
 $ua->timeout($TIMEOUT*60);
@@ -67,7 +68,7 @@ my $cookie_jar = HTTP::Cookies->new( 'file' => $Cookie_file );
 $ua->cookie_jar($cookie_jar);
 my $request;
 my $response;
-my $url;
+my $url = "http://login.yahoo.com/config/login?.done=http://groups.yahoo.com/group/$group/";
 my $content;
 my $group_domain;
 
@@ -76,9 +77,9 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 }
 
 {
-	$request = GET "http://login.yahoo.com/config/login?.done=http://groups.yahoo.com/group/$group/";
+	$request = GET $url;
 	$response = $ua->simple_request($request);
-	terminate("[http://login.yahoo.com/config/login?.done=http://groups.yahoo.com/group/$group/] " . $response->as_string) if $response->is_error;
+	terminate("[$url] " . $response->as_string) if $response->is_error;
 	
 	while ( $response->is_redirect ) {
 		$cookie_jar->extract_cookies($response);
@@ -92,11 +93,6 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 	$cookie_jar->save if $COOKIE_SAVE;
 	
 	$content = $response->content;
-	
-	my $login_rand;
-	my $u;
-	my $challenge;
-	my $pd;
 	
 	if ($content =~ /Login Form/) {
 		my ($login_url) = $content =~ m!<form method="post" action="(.+?login\.yahoo.+?)"!s;
@@ -197,10 +193,11 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 		$content = $response->content;
 
 		terminate("Couldn't log in $username") if ( !$response->is_success );
-
 		terminate("Wrong password entered for $username") if ( $content =~ /Invalid Password/ );
-
 		terminate("Yahoo user $username does not exist") if ( $content =~ /ID does not exist/ );
+		terminate("Yahoo error : not a member of this group") if $content =~ /You are not a member of the group /;
+		terminate("Yahoo error : nonexistant group") if $content =~ /There is no group called /;
+		terminate("Yahoo error : database unavailable") if $content =~ /The database is unavailable at the moment/;
 
 		print "Successfully logged in as $username.\n" if $VERBOSE; 
 		
@@ -275,9 +272,6 @@ sub download_folder {
 	$content = $response->content;
 	
 	eval {
-		terminate("Yahoo error : not a member of this group") if $content =~ /You are not a member of the group /;
-		terminate("Yahoo error : nonexistant group") if $content =~ /There is no group called /;
-		terminate("Yahoo error : database unavailable") if $content =~ /The database is unavailable at the moment/;
 		return if $content =~ /This folder is empty/;
 		my ($cells) = $content =~ /<!-- start content include -->\s+(.+?)\s+<!-- end content include -->/s;
 		while ($cells =~ /<tr>.+?<span class="title">\s+<a href="(.+?)">(.+?)<\/a>\s+<\/span>.+?<\/tr>/sg) {
