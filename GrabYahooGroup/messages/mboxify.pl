@@ -26,7 +26,7 @@ closedir GHD;
 
 print "Processing " . scalar @files . " messages\n";
 
-foreach my $file (sort @files) {
+foreach my $file (sort {$a <=> $b} @files) {
 	print ".";
 	open MSFD, "< $folder/$file" or die "$file : $!\n";
 	my $from_line = <MSFD>;
