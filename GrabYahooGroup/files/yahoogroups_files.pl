@@ -1,6 +1,6 @@
 #!/usr/bin/perl -wT
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.13 2009-10-04 04:35:28 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/GrabYahooGroup/files/yahoogroups_files.pl,v 1.14 2009-11-14 05:15:49 mithun Exp $
 
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV PATH)};
 
@@ -14,6 +14,7 @@ use LWP::UserAgent ();
 use LWP::Simple ();
 use Getopt::Long;
 use HTML::Entities;
+use Term::ReadKey;
 
 # By default works in verbose mode unless VERBOSE=0 via environment variable for cron job.
 my $VERBOSE = 1;
@@ -68,9 +69,8 @@ my $cookie_jar = HTTP::Cookies->new( 'file' => $Cookie_file );
 $ua->cookie_jar($cookie_jar);
 my $request;
 my $response;
-my $url = "http://login.yahoo.com/config/login?.done=http://groups.yahoo.com/group/$group/";
+my $url = "http://login.yahoo.com/config/login?.done=http://groups.yahoo.com/group/$group/files/";
 my $content;
-my $group_domain;
 
 if ($COOKIE_LOAD and -f $Cookie_file) {
 	$cookie_jar->load();
@@ -137,7 +137,6 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 		$form_fields{'login'} = $username unless ($form_fields{'login'} or $form_fields{'.slogin'});
 	
 		unless ($password) {
-			use Term::ReadKey;
 			ReadMode('noecho');
 			print "Enter password : ";
 			$password = ReadLine(0);
@@ -244,19 +243,16 @@ if ($COOKIE_LOAD and -f $Cookie_file) {
 	}
 }
 
-($group_domain) = $url =~ /\/\/(.*?groups.yahoo.com)\//;
-
-download_folder('');
+download_folder($url, '');
 
 sub download_folder {
-	my ($sub_folder) = @_;
-	# print "[$group]$sub_folder\n" if $VERBOSE;
+	my ($folder_url, $folder_name) = @_;
 
-	terminate("$! : $group$sub_folder") unless (-d $group . $sub_folder or mkdir $group . $sub_folder);
+	terminate("$! : $group$folder_name") unless (-d $group . $folder_name or mkdir $group . $folder_name);
 
-	$request = GET "http://$group_domain/group/$group/files$sub_folder/";
+	$request = GET $folder_url;
 	$response = $ua->simple_request($request);
-	terminate("[http://$group_domain/group/$group/files$sub_folder/] " . $response->as_string) if $response->is_error;
+	terminate("[$folder_url] " . $response->as_string) if $response->is_error;
 	
 	while ( $response->is_redirect ) {
 		$cookie_jar->extract_cookies($response);
@@ -276,17 +272,22 @@ sub download_folder {
 		my ($cells) = $content =~ /<!-- start content include -->\s+(.+?)\s+<!-- end content include -->/s;
 		while ($cells =~ /<tr>.+?<span class="title">\s+<a href="(.+?)">(.+?)<\/a>\s+<\/span>.+?<\/tr>/sg) {
 			my $file_url = $1;
+			$file_url = $HTTP::URI_CLASS->new($file_url, $folder_url)->abs($folder_url);
 			my $file_name = decode_entities($2);
 			utf8::encode($file_name) unless utf8::is_utf8($file_name);
-			next if -e $group . $sub_folder . '/' . $file_name;
 			if ($file_url =~ /\/$/) {
-				download_folder("$sub_folder/$file_name");
+				download_folder($file_url, $file_name);
 				next;
 			}
-			print "[$group]$sub_folder/$file_name\n" if $VERBOSE;
+			next if -e $group . $folder_name . '/' . $file_name;
+			print "[$group]$folder_name/$file_name\n" if $VERBOSE;
 	
 			$request = GET $file_url;
 			$response = $ua->simple_request($request);
+			if ( $response->code == 404 ) {
+				print "\t\t[ERROR] File not Found - review online and report to Yahoo\n";
+				next;
+			}
 			terminate("\n\t[$file_url] " . $response->as_string) if ($response->is_error);
 			while ( $response->is_redirect ) {
 				$cookie_jar->extract_cookies($response);
@@ -315,7 +316,7 @@ sub download_folder {
 				next;
 			}
 		
-			terminate("$! : $file_name") unless open(IFD, "> $group$sub_folder/$file_name");
+			terminate("$! : $file_name") unless open(IFD, "> $group$folder_name/$file_name");
 			binmode(IFD);
 			print IFD $content;
 			close IFD;
