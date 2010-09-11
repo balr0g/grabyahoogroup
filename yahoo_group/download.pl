@@ -1,602 +1,612 @@
-#!/usr/bin/perl -wT
+#!/usr/bin/perl -w
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.2 2005-09-08 13:01:03 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.3 2010-09-11 16:37:03 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
 use strict;
+use utf8;
+
+use Crypt::SSLeay;
+use HTTP::Cookies ();
+use LWP::UserAgent ();
+use LWP::Simple ();
+use HTML::Entities;
+
+my $GROUP;
+
+my $logger;
+my $client;
+
 
 my $gyg = new GrabYahoo;
-if ( ref($gyg) eq 'GrabYahoo' ) {
-	$gyg->process();
-} else {
-	print $gyg . "\n";
-}
+
+$gyg->process();
 
 
 package GrabYahoo;
 
 use Getopt::Long;
+use Term::ReadKey;
 
 sub new {
+	# Which module to use ?
+	my $MESSAGES;
+	my $FILES;
+	my $PHOTOS;
+	my $MEMBERS;
 
 	my $VERBOSE = 1;
 
-	my $begin_message_id;
-	my $end_message_id;
-
-	my $REFRESH = 1; # Download only new content
-
-	my $GETADULT = 1; # Get adult content
-
-	my $COOKIE_SAVE = 1; # Save cookies to local filesystem
-	my $COOKIE_LOAD = 1; # Load cookies from previous session
-
-	my $HUMAN_WAIT = 40; # Seconds to read an average page in YG
-	my $HUMAN_REFLEX = 20; # Random seconds to wait before next request
-	my $HUMAN_BEHAVIOR = 1; # Disable emulation of human behavior
-
-	my $BLOCK_PERIOD = 60*60; # One hour
-
-	my $BATCH_MODE = 0;
 	my $USERNAME = '';
 	my $PASSWORD = '';
-
-	my $PROXY = ''; # In format http://hostname:port/
-
-	my $TIMEOUT = 10; # In minutes for slow download connections
-
-	my $USER_AGENT = 'GrabYahoo/2.00'; # Check legal implication of what you wish to set this value to
-	my $SNOOZE = 60*60; # How long to snooze if Yahoo is blocking your request
 
 	my $BEGIN_MSGID;
 	my $END_MSGID;
 
-	# Which module to use ?
-	my $MESSAGES = 0;
-	my $FILES = 0;
-	my $PHOTOS = 0;
-	my $MEMBERS = 0;
+	my $ALL = 1;
 
-	my $result = GetOptions ('messages' => \$MESSAGES,
-				 'files' => \$FILES,
-				 'photos' => \$PHOTOS,
-				 'members' => \$MEMBERS,
-				 'verbose' => \$VERBOSE,
-				 'refresh' => \$REFRESH,
-				 'getadult' => \$GETADULT,
-				 'cookie_save' => \$COOKIE_SAVE,
-				 'cookie_load' => \$COOKIE_LOAD,
-				 'human_wait=i' => \$HUMAN_WAIT,
-				 'human_reflex=i' => \$HUMAN_REFLEX,
-				 'human_behavior' => \$HUMAN_BEHAVIOR,
-				 'block_period=i' => \$BLOCK_PERIOD,
-				 'batch_mode' => \$BATCH_MODE,
+	my $result = GetOptions ('messages!' => \$MESSAGES,
+				 'files!' => \$FILES,
+				 'photos!' => \$PHOTOS,
+				 'members!' => \$MEMBERS,
+				 'verbose!' => \$VERBOSE,
 				 'begin=i' => \$BEGIN_MSGID,
 				 'end=i' => \$END_MSGID,
 				 'username=s' => \$USERNAME,
 				 'password=s' => \$PASSWORD,
-				 'proxy=s' => \$PROXY,
-				 'timeout=i' => \$TIMEOUT,
-				 'user_agent=s' => \$USER_AGENT,
-				 'snooze=i' => \$SNOOZE);
+				 'group=s' => \$GROUP,
+				);
 
-	return "Can't parse command line parameters" unless $result;
+	die "Can't parse command line parameters" unless $result;
 
-	my ($user_group) = @ARGV;
-	return "Please specify a group to process" unless $user_group;
-	my ($group) = $user_group =~ /^([\w_\-]+)$/;
-	return "Group name provided is not valid" if $user_group ne $group;
-	unless ($group or $BATCH_MODE) {
-		print "Group to process : ";
-		$user_group = <STDIN>;
-		($group) = $user_group =~ /^([\w_\-]+)$/;
-		unless ($group) {
-			print "Group name is necessary to proceed\n";
-			exit;
-		}
+	my @terminals = GetTerminalSize(*STDOUT);
+	die 'Username not provided and not running in terminal' unless scalar @terminals;
+	unless ($USERNAME) {
+		print "Enter username : ";
+		$USERNAME = <STDIN>;
+		chomp $USERNAME;
 	}
 
-	my $COOKIE_FILE = "$group/yahoogroups.cookies";
-	
-	my $client = new GrabYahoo::Client($VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BLOCK_PERIOD, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE);
+	foreach ($MESSAGES, $FILES, $PHOTOS, $MEMBERS) { $ALL = 0 if $_; };
+	foreach ($MESSAGES, $FILES, $PHOTOS, $MEMBERS) { $_ = 1 if $ALL; };
 
-	my $MODULE = { "MESSAGES" => {'SUB' => sub { my $module = new GrabYahoo::Messages($group, $client, $BEGIN_MSGID, $END_MSGID);
-					return $module; },
-				      'ACTIVE' => $MESSAGES},
-		       "FILES"    => {'SUB' => sub { my $module = new GrabYahoo::Files($group, $client);
-					return $module; },
-				      'ACTIVE' => $FILES},
-		       "PHOTOS"   => {'SUB' => sub { my $module = new GrabYahoo::Photos($group, $client);
-					return $module; },
-				      'ACTIVE' => $PHOTOS},
-		       "MEMBERS"  => {'SUB' => sub { my $module = new GrabYahoo::Members($group, $client);
-					return $module; },
-				      'ACTIVE' => $MEMBERS}
-		  };
-
-	my $active_module = '';
-	foreach my $module (keys %$MODULE) {
-		next unless $MODULE->{$module}->{'ACTIVE'};
-		unless ($active_module) {
-			$active_module = $module;
-		} else {
-			return "Please select only one module : Messages, Files, Photos, Members";
-		}
-	}
-
-	unless ($active_module) {
-		print STDERR "Warning no module specified falling back to MESSAGES\n";
-		$active_module = "MESSAGES";
-	}
-
-	$| = 1 if $VERBOSE;
-
-	my $module = $MODULE->{$active_module}->{'SUB'};
-	my $self = &$module;
-	
-	return $self if ref($self) eq undef;
-
-	my $client = $self->{'CLIENT'};
-
-	$client->set_group_url($group);
-
-	return $self;
-}
-
-1;
-
-
-package GrabYahoo::Messages;
-
-sub new {
 	my $self = {};
 
-	my ($group, $client, $BEGIN_MSGID, $END_MSGID) = @_;
+	mkdir $GROUP or die "$GROUP: $!\n" unless -d $GROUP;
 
-	$self->{'GROUP'} = $group;
+	$logger = new GrabYahoo::Logger($GROUP . '/GrabYahooGroup.log');
 
-	$self->{'CLIENT'} = $client;
+	$client = new GrabYahoo::Client($USERNAME, $PASSWORD);
 
-	my $result = $client->retrieve("/group/$group/message/1");
-	
-	my $response;
-	
-	if ((ref $result) eq 'HASH') {
-		$response = $result->{'RESPONSE'};
-	} elsif (defined $result) {
-		return $result;
+	my $content = $client->response()->content();
+
+	$logger->info('Detecting server capabilities');
+	# Detect capabilities
+	$MESSAGES = ($MESSAGES and $content =~ m!<a href="/group/$GROUP/messages">.+?</a>!s) ? 1: 0;
+	$FILES = ($FILES and $content =~ m!<a href="/group/$GROUP/files">.+?</a>!s) ? 1: 0;
+	$PHOTOS = ($PHOTOS and $content =~ m!<a href="http://.+?/group/$GROUP/photos">.+?</a>!s) ? 1: 0;
+	$MEMBERS = ($MEMBERS and $content =~ m!<a href="/group/$GROUP/members">.+?</a>!s) ? 1: 0;
+
+	if ($MESSAGES) {
+		$logger->info('MESSAGES enabled');
+		my $object = eval { new GrabYahoo::Messages ($BEGIN_MSGID, $END_MSGID); };
+		if ($@) {
+			$logger->error( $@ );
+		} else {
+			push @{ $self->{'SECTIONS'} }, $object;
+		}
 	}
 
-	my $content = $response->content();
+	if ($FILES) {
+		$logger->info('FILES enabled');
+		my $object = eval { new GrabYahoo::Files; };
+		if ($@) {
+			$logger->error( $@ );
+		} else {
+			push @{ $self->{'SECTIONS'} }, $object;
+		}
+	}
 
-	return 'Not a member of the group : $group' if $content =~ /You are not a member of the group <b>$group/;
-	
-	my ($b, $e) = $content =~ /(\d+)-\d+ of (\d+) /;
-	
-	return q{Couldn't retrieve message begin page};
-	
-	$BEGIN_MSGID = $b if((!defined $BEGIN_MSGID) or ($b > $BEGIN_MSGID));
-	$END_MSGID = $e if ((!defined $END_MSGID) or ($e < $END_MSGID));
-	
-	$self->{'BEGIN_MSGID'} = $BEGIN_MSGID;
-	$self->{'END_MSGID'} = $END_MSGID;
-	
+	if ($PHOTOS) {
+		$logger->info('PHOTOS enabled');
+		my $object = eval { new GrabYahoo::Photos; };
+		if ($@) {
+			$logger->error( $@ );
+		} else {
+			push @{ $self->{'SECTIONS'} }, $object;
+		}
+	}
+
+	if ($MEMBERS) {
+		$logger->info('MEMBERS enabled');
+		my $object = eval { new GrabYahoo::Members; };
+		if ($@) {
+			$logger->error( $@ );
+		} else {
+			push @{ $self->{'SECTIONS'} }, $object;
+		}
+	}
+
+	die 'Group homepage has no valid sections' unless $self->{'SECTIONS'};
+
 	return bless $self;
 }
 
-sub process {
-	my $self = shift;
-	
-	my $REFRESH = $self->{'REFRESH'};
-	my $VERBOSE = $self->{'VERBOSE'};
-	my $BEGIN_MSGID = $self->{'BEGIN_MSGID'};
-	my $END_MSGID = $self->{'END_MSGID'};
-	my $group = $self->{'GROUP'};
-	
-	print "Processing messages between $BEGIN_MSGID and $END_MSGID\n" if $VERBOSE;
-	
-	foreach my $messageid ($BEGIN_MSGID..$END_MSGID) {
-		next if $REFRESH and -f "$group/$messageid";
-		my $result = $self->retrieve("/group/$group/message/$messageid?source=1&unwrap=1");
-		my $response;	
-		if ((ref $result) eq 'HASH') {
-			$response = $result->{'RESPONSE'};
-		} elsif (defined $result) {
-			return $result;
-		}
-		my $content = $response->content();
-		
-	}
-}
-
-1;
-
-
-package GrabYahoo::Files;
-
-sub new {
-	my $self = {};
-
-	my ($group, $client) = @_;
-
-	$self->{'GROUP'} = $group;
-
-	$self->{'CLIENT'} = $client;
-
-	my $result = $client->retrieve("http://login.yahoo.com/config/login?.intl=us&.src=ygrp&.done=http%3a//groups.yahoo.com%2Fgroup%2F$group%2Ffiles");
-	
-	my $response;
-	
-	if ((ref $result) eq 'HASH') {
-		$response = $result->{'RESPONSE'};
-	} elsif (defined $result) {
-		return $result;
-	}
-
-	my $content = $response->content();
-
-	return bless $self unless $content =~ /You are not a member of the group <b>$group/;
-	
-	return 'Not a member of this group';
-}
 
 sub process {
 	my $self = shift;
+	foreach ( @{$self->{'SECTIONS'}} ) { $_->process() };
 }
 
-1;
-
-package GrabYahoo::Photos;
-
-sub new {
-	my $self = {};
-
-	my ($group, $client) = @_;
-
-	$self->{'GROUP'} = $group;
-
-	$self->{'CLIENT'} = $client;
-
-	my $result = $client->retrieve("http://login.yahoo.com/config/login?.intl=us&.src=ygrp&.done=http%3a//groups.yahoo.com%2Fgroup%2F$group%2Ffiles");
-	
-	my $response;
-	
-	if ((ref $result) eq 'HASH') {
-		$response = $result->{'RESPONSE'};
-	} elsif (defined $result) {
-		return $result;
-	}
-
-	my $content = $response->content();
-
-	return bless $self unless $content =~ /You are not a member of the group <b>$group/;
-	
-	return 'Not a member of this group';
-}
-
-sub process {
-	my $self = shift;
-}
-
-1;
-
-package GrabYahoo::Members;
-
-sub new {
-	my $self = {};
-
-	my ($group, $client) = @_;
-
-	$self->{'GROUP'} = $group;
-
-	$self->{'CLIENT'} = $client;
-
-	my $result = $client->retrieve("http://login.yahoo.com/config/login?.intl=us&.src=ygrp&.done=http%3a//groups.yahoo.com%2Fgroup%2F$group%2Fmembers");
-	
-	my $response;
-	
-	if ((ref $result) eq 'HASH') {
-		$response = $result->{'RESPONSE'};
-	} elsif (defined $result) {
-		return $result;
-	}
-
-	my $content = $response->content();
-
-	return bless $self unless $content =~ /You are not a member of the group <b>$group/;
-	
-	return 'Not a member of this group';
-}
-
-sub process {
-	my $self = shift;
-}
-
-1;
 
 package GrabYahoo::Client;
 
 use HTTP::Request::Common qw(GET POST);
-use HTTP::Cookies ();
-use LWP::UserAgent ();
-use LWP::Simple ();
 
 sub new {
 	my $package = shift;
+	my ($user, $pass) = @_;
 
-	my ($VERBOSE, $REFRESH, $GETADULT, $COOKIE_SAVE, $COOKIE_LOAD, $HUMAN_WAIT, $HUMAN_REFLEX, $HUMAN_BEHAVIOR, $BLOCK_PERIOD, $BATCH_MODE, $USERNAME, $PASSWORD, $PROXY, $TIMEOUT, $USER_AGENT, $SNOOZE, $COOKIE_FILE) = @_;
+	my $self = bless {};
 
-	srand(time() . $$) if $HUMAN_BEHAVIOR;
+	my @accessors = ('user', 'pass', 'ua', 'cookie_jar', 'response');
+	no strict 'refs';
+	foreach my $accessor (@accessors) {
+		*$accessor = sub {
+			my $self = shift;
+			my ($data) = @_;
+			$self->{uc($accessor)} = $data if $data;
+			return $self->{uc($accessor)};
+		};
+	}
+	use strict;
 
-	my $self = {};
-
-	$self->{'VERBOSE'} = $VERBOSE;
-	$self->{'REFRESH'} = $REFRESH;
-	$self->{'GETADULT'} = $GETADULT;
-	$self->{'COOKIE_SAVE'} = $COOKIE_SAVE;
-	$self->{'COOKIE_LOAD'} = $COOKIE_LOAD;
-	$self->{'HUMAN_WAIT'} = $HUMAN_WAIT;
-	$self->{'HUMAN_REFLEX'} = $HUMAN_REFLEX;
-	$self->{'HUMAN_BEHAVIOR'} = $HUMAN_BEHAVIOR;
-	$self->{'BLOCK_PERIOD'} = $BLOCK_PERIOD;
-	$self->{'BATCH_MODE'} = $BATCH_MODE;
-	$self->{'USERNAME'} = $USERNAME;
-	$self->{'PASSWORD'} = $PASSWORD;
-	$self->{'PROXY'} = $PROXY;
-	$self->{'TIMEOUT'} = $TIMEOUT;
-	$self->{'USER_AGENT'} = $USER_AGENT;
-	$self->{'SNOOZE'} = $SNOOZE;
+	$self->user($user);
+	$self->pass($pass);
 
 	my $ua = new LWP::UserAgent;
-	$ua->proxy('http', $PROXY) if $PROXY;
-	$ua->agent($USER_AGENT);
-	$ua->timeout($TIMEOUT*60);
-	my $cookie_jar = HTTP::Cookies->new( 'file' => $COOKIE_FILE );
+	$ua->agent('GrabYahoo/2.00');
+	my $cookie_file = "$GROUP/$user.cookie";
+	my $cookie_jar = HTTP::Cookies->new( 'file' => $cookie_file );
+	$cookie_jar->load();
 	$ua->cookie_jar($cookie_jar);
+	my $response = $ua->simple_request(GET 'http://groups.yahoo.com/group/' . $GROUP);
+	$self->response($response);
 
-	if ($COOKIE_LOAD and -f $COOKIE_FILE) {
-		$cookie_jar->load();
+	$self->ua($ua);
+	$self->cookie_jar($cookie_jar);
+
+	my $content = $self->fetch(qq{https://login.yahoo.com/config/verify?.done=http%3a%2F%2Fgroups.yahoo.com%2Fgroup%2F$GROUP%2F});
+
+	return $self;
+}
+
+
+sub fetch {
+	my $self = shift;
+	my ($url, $referrer, $is_image) = @_;
+
+	my $ua = $self->ua();
+	my $cookie_jar = $self->cookie_jar();
+
+	my $SLEEP_COUNT = 1;
+
+	$url = $self->get_absurl($url);
+	$referrer = $self->get_absurl($referrer) if $referrer;
+
+	my @headers = ('Referer' => $referrer) if $referrer;
+
+	my $request = GET $url, @headers;
+	my $response = $ua->simple_request($request);
+	$cookie_jar->extract_cookies($response);
+	$cookie_jar->save();
+	$self->response($response) unless $is_image;
+
+	die '[' . $url . '] ' . $response->as_string() if $response->is_error();
+	my $content = $response->content();
+
+	while($response->code() == 999 or $content =~ /Unfortunately, we are unable to process your request at this time/i) {
+		$logger->debug($response->code());
+		$logger->warn('Yahoo SPAM block - trying to check after ' . $SLEEP_COUNT . ' hours');
+		sleep 60*60*$SLEEP_COUNT;
+		$content = $self->fetch($url);
 	}
 
-	$self->{'UA'} = $ua;
+	if ($content =~ /Yahoo! Groups is an advertising supported service/ or $content =~ /Continue to message/s) {
+		$logger->debug($response->code());
+		$content = $self->fetch($url);
+	}
 
-	$self->{'GROUP_URL'} = 'groups.yahoo.com';
+	if ($content =~ m!<form .+? name="login_form"!) {
+		$logger->info('Performing login');
+		$content = $self->process_loginform();
+	}
+
+	if ($content =~ m!<form action="/adultconf"!) {
+		$logger->info('Confirming as adult');
+		$content = $self->process_adultconf();
+	}
+
+	my $redirect;
+	while ( $self->response()->is_redirect or $content =~ /location.replace/) {
+		if ($self->response()->is_redirect()) {
+			$redirect = $self->response()->header('Location');
+		} else {
+			($redirect) = $content =~ m!location\.replace\((.+?)\)!;
+			$redirect =~ s/"//g;
+			$redirect =~ s/'//g;
+		}
+		if ($url =~ m!errors/framework_error!) {
+			$logger->warn('Yahoo framework error');
+			$logger->info('Sleeping for 5 seconds');
+			sleep 5;
+			$logger->info('Attempting to retrieve original URL');
+			$redirect = $url;
+			$self->error_count();
+		}
+		$url = $self->get_absurl($redirect);
+		$logger->info('Redirected to: ' . $url);
+		$content = $self->fetch($url);
+	}
+
+	$self->reset_error_count();
+
+	return $content;
+}
+
+
+sub error_count {
+	my $self = shift;
+	$self->{'ERROR_COUNTER'}++;
+	die 'Too many errors from server' if $self->{'ERROR_COUNTER'} > 10;
+}
+
+
+sub reset_error_count {
+	my $self = shift;
+	$self->{'ERROR_COUNTER'} = 0;
+}
+
+
+sub process_adultconf {
+	my $self = shift;
+	my $response = $self->response();
+
+	my $ua = $self->ua();
+	my $cookie_jar = $self->cookie_jar();
+
+	my $content = $response->content();
+
+	my %params;
+
+	my ($form) = $content =~ m!(<form action="/adultconf".+?>.+?</form>)!s;
+
+	while ($form =~ m!<input.+?type="hidden" name="(.+?)" value="(.+?)">!g) {
+		my $name = $1;
+		my $value = $2;
+		$params{$name} = $value;
+	}
+	$params{'accept'} = 'I Accept';
+
+	my $request = POST $self->get_absurl('/adultconf', $response), [%params];
+	$request->content_type('application/x-www-form-urlencoded');
+	$request->header('Accept' => '*/*');
+	$request->header('Allowed' => 'GET HEAD PUT');
+	$response = $ua->simple_request($request);
+	$cookie_jar->extract_cookies($response);
+	$self->response($response);
+
+	die '[/adultconf] ' . $response->as_string() if $response->is_error();
+
+	return $response->content();
+}
+
+
+sub get_absurl {
+	my $self = shift;
+	my ($url) = @_;
+	local $URI::ABS_ALLOW_RELATIVE_SCHEME = 1;
+	my $base = $self->response()->base();
+	$url = $HTTP::URI_CLASS->new($url, $base)->abs($base);
+
+	return $url;
+}
+
+
+sub process_loginform {
+	my $self = shift;
+	my $response = $self->response();
+
+	my $ua = $self->ua();
+	my $cookie_jar = $self->cookie_jar();
+
+	my $content = $response->content();
+
+	my ($form) = $content =~ m!(<form .+?login_form.+?>.+?</form>)!s;
+
+	my ($post) = $form =~ m!<form.+?action=(.+?) !;
+	$post =~ s/"//g;
+	$post =~ s/'//g;
+
+	my %params;
+
+	while ($form =~ m!<input.+?name="(.+?)".+?value="(.+?)">!g) {
+		my $name = $1;
+		my $value = $2;
+		$params{$name} = $value;
+	}
+
+	unless ($self->pass()) {
+		my @terminals = GetTerminalSize(*STDOUT);
+		die 'Password not provided and not running in terminal' unless scalar @terminals;
+		unless ($self->pass()) {
+			use Term::ReadKey;
+			ReadMode('noecho');
+			print "Enter password : ";
+			my $pass = ReadLine(0);
+			ReadMode('restore');
+			chomp $pass;
+			$self->pass($pass);
+			print "\n";
+		}
+	}
+
+	$params{'.persistent'} = 'y';
+	$params{'login'} = $self->user();
+	$params{'passwd'} = $self->pass();
+
+	my $request = POST $post, [%params];
+	$request->content_type('application/x-www-form-urlencoded');
+	$request->header('Accept' => '*/*');
+	$request->header('Allowed' => 'GET HEAD PUT');
+	$response = $ua->simple_request($request);
+	$cookie_jar->extract_cookies($response);
+	$self->response($response);
+
+	die '[' . $post . '] ' . $response->as_string() if $response->is_error();
+
+	return $response->content();
+}
+
+
+package GrabYahoo::Logger;
+
+use Term::ReadKey;
+
+
+sub new {
+	my $package = shift;
+	my $self = {};
+	my ($logfile) = @_;
+
+	my @terminals = GetTerminalSize(*STDOUT);
+	$self->{'HANDLES'} = [ *STDOUT ] if scalar @terminals;
+
+	my $file_handle;
+	open ($file_handle, ">>", $logfile) or die $logfile . ": $!\n";
+	push @{ $self->{'HANDLES'} }, $file_handle;
+
+	# Various loggers
+	my @loggers = ('debug', 'info', 'warn', 'error', 'fatal');
+	no strict 'refs';
+	foreach my $level (@loggers) {
+		my $tag = uc($level);
+		*$level = sub {my $self = shift; $self->dispatch("[$tag]", @_, "\n"); };
+	}
+	use strict;
 
 	return bless $self;
 }
 
-sub set_group_url {
+
+sub dispatch {
 	my $self = shift;
-
-	my ($group) = @_;
-
-	my $result = $self->retrieve("/group/$group/");
-	
-	return unless defined $result;
-	
-	return if (ref $result) ne 'HASH';
-
-	($self->{'GROUP_DOMAIN'}) = $result->{'REQUEST'}->uri() =~ /http:\/\/(.+?groups\.yahoo\.com)/;
+	foreach my $handle ( @{$self->{'HANDLES'}} ) {
+		print $handle @_;
+	}
 }
 
-sub retrieve {
-	my $self = shift;
 
+package GrabYahoo::Messages;
+
+
+sub new {
+	my $self = {};
+	return bless $self;
+}
+
+
+sub process {
+	$logger->info('Processing MESSAGES');
+}
+
+
+package GrabYahoo::Files;
+
+
+sub new {
+	my $self = {};
+	return bless $self;
+}
+
+
+sub process {
+	my $self = shift;
+	$logger->info('Processing FILES');
+	mkdir $GROUP . '/FILES' or die "$GROUP/FILES: $!\n" unless -d $GROUP . '/FILES';
+	$self->process_folder(qq{/group/$GROUP/files});
+}
+
+
+sub process_folder {
+}
+
+
+package GrabYahoo::Members;
+
+
+sub new {
+	my $self = {};
+	return bless $self;
+}
+
+
+sub process {
+	$logger->info('Processing MEMBERS');
+}
+
+
+package GrabYahoo::Photos;
+
+use Data::Dumper;
+use HTML::Entities;
+
+sub new {
+	my $self = {};
+	if (-f $GROUP . '/PHOTOS/layout.dump') {
+		my $buf = $/;
+		$/ = undef;
+		open(LAY, '<', $GROUP . '/PHOTOS/layout.dump') or die $GROUP . '/PHOTOS/layout.dump' . $! . "\n";
+		my $dump = <LAY>;
+		close LAY;
+		$/ = $buf;
+		my $VAR1;
+		eval $dump;
+		$self->{'LAYOUT'} = $VAR1;
+	}
+	return bless $self;
+}
+
+
+sub save_layout {
+	my $self = shift;
+	my ($final) = @_;
+
+	my $LAYOUT = $self->{'LAYOUT'};
+
+	return unless $LAYOUT;
+
+	my $layout = Data::Dumper->Dump([$LAYOUT]);
+	open (LAY, '>', $GROUP . '/PHOTOS/layout.dump') or die $GROUP . '/PHOTOS/layout.xml: ' . $! . "\n";
+	print LAY $layout;
+	close LAY;
+}
+
+
+sub process {
+	my $self = shift;
+	$logger->info('Processing PHOTOS');
+	my $start = 1;
+	my $next_page = 1;
+	mkdir $GROUP . '/PHOTOS' or die "$GROUP/PHOTOS: $!\n" unless -d $GROUP . '/PHOTOS';
+	while ($next_page) {
+		$next_page = $self->process_album(qq{/group/$GROUP/photos/album/0/list?mode=list&order=mtime&start=$start&count=20&dir=desc});
+		$start += 20;
+	}
+
+	$self->save_layout(1);
+}
+
+
+sub process_album {
+	my $self = shift;
 	my ($url) = @_;
-	my $result;
 
-	my $group_domain = $self->{'GROUP_DOMAIN'};
-	my $ua = $self->{'UA'};
-	my $HUMAN_WAIT = $self->{'HUMAN_WAIT'};
-	my $HUMAN_REFLEX = $self->{'HUMAN_REFLEX'};
-	my $HUMAN_BEHAVIOR = $self->{'HUMAN_BEHAVIOR'};
-	
-	my $cookie_jar = $ua->cookie_jar();
-	
-	my $VERBOSE = $self->{'VERBOSE'};
-	
-	sleep($HUMAN_WAIT + int(rand($HUMAN_REFLEX))) if $HUMAN_BEHAVIOR;
+	my $content = $client->fetch($url);
 
-	my $request = GET "$group_domain$url";
-	my $response = $ua->simple_request($request);
-	$cookie_jar->extract_cookies($response);
+	my $more_pages = 0;
 
-	return "[$group_domain$url] " . $response->as_string if $response->is_error;
-	
-	$self->{'CYCLE'} = 1;
+	while ($content =~ m!<a href="(/group/$GROUP/photos/album/\d+/pic/\d+/view)!sg) { $self->process_pic($1 . '?picmode=original&mode=list&order=ordinal&start=1&dir=asc'); };
 
-	$result = $self->holding_pages($request, $response);
-	
-	if ((ref $result) eq 'HASH') {
-		$request = $result->{'REQUEST'};
-		$response = $result->{'RESPONSE'};
-	} elsif ((defined $result) and ((ref $result) ne 'HASH')) {
-		return $result;
-	}
-
-	while ( $response->is_redirect ) {
-		$url = GetRedirectUrl($response);
-		$result->{'LAST_URL'} = $url;
-		$request = GET $url;
-		$response = $ua->simple_request($request);
-		$cookie_jar->extract_cookies($response);
-		return "[$url] " . $response->as_string if $response->is_error;
-
-		$self->{'CYCLE'} = 1;
-
-		$result = $self->holding_pages($request, $response);
-	
-		if ((ref $result) eq 'HASH') {
-			$request = $result->{'REQUEST'};
-			$response = $result->{'RESPONSE'};
-		} elsif (defined $result) {
-			return $result;
+	while ($content =~ m!(<div class="ygrp-photos-title ">.+?<br class="clear-both"/>)!sg) {
+		my $record = $1;
+		my ($album_url, $album_id, $album_name) = $record =~ m!<div class="ygrp-photos-title ">.+?<a href="(/group/$GROUP/photos/album/(\d+)/pic/list).*?>(.+?)</a>!sg;
+		$album_name = decode_entities($album_name);
+		my ($album_access) = $record =~ m!<div class="ygrp-photos-access">\s+(.+?)</div>!s;
+		my ($creator_profile, $album_creator) = $record =~ m!<div class="ygrp-photos-creator "><a\s+href="(.+?)">(.+?)</a>!s;
+		$album_creator = decode_entities($album_creator);
+		my ($number_photos) = $record =~ m!<div class="ygrp-photos-size">(\d+)</div>!s;
+		my ($last_modified) = $record =~ m!<div class="ygrp-photos-modified-date selected">\s+(.+?)</div>!s;
+		$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_NAME'} = $album_name;
+		$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_ACCESS'} = $album_access;
+		$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'CREATOR_PROFILE'} = $creator_profile;
+		$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_CREATOR'} = $album_creator;
+		$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'NUMBER_PHOTOS'} = $number_photos;
+		$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'LAST_MODIFIED'} = $last_modified;
+		$logger->info('[' . $GROUP . '] ' . $album_name);
+		my $start = 1;
+		my $next_page = 1;
+		mkdir $GROUP . '/PHOTOS/' . $album_id or die "$GROUP/PHOTOS/$album_id: $!\n" unless -d $GROUP . '/PHOTOS/' . $album_id;
+		while ($next_page) {
+			$next_page = $self->process_album($album_url . qq#?mode=list&order=mtime&start=$start&count=20&dir=desc#);
+			$start += 20;
 		}
-	}
+	};
 
-	$result->{'REQUEST'}  = $request;
-	$result->{'RESPONSE'} = $response;
+	$more_pages = 1 if $content =~ m!<a href="(/group/$GROUP/photos/album/(\d+)/pic/list).*?>Next<!sg;
 
-	return $result;
+	$self->save_layout();
+
+	return $more_pages;
 }
 
 
-sub holding_pages {
+sub process_pic {
 	my $self = shift;
-	
-	my ($request, $response) = @_;
-	
-	my $result;
-	
-	my $ua = $self->{'UA'};
-	my $VERBOSE = $self->{'VERBOSE'};
-	my $username = $self->{'USERNAME'};
-	my $password = $self->{'PASSWORD'};
-	my $BATCH_MODE = $self->{'BATCH_MODE'};
-	my $group_domain = $self->{'GROUP_DOMAIN'};
-	my $HUMAN_WAIT = $self->{'HUMAN_WAIT'};
-	my $HUMAN_REFLEX = $self->{'HUMAN_REFLEX'};
-	my $HUMAN_BEHAVIOR = $self->{'HUMAN_BEHAVIOR'};
-	my $GETADULT = $self->{'GETADULT'};
-	my $BLOCK_PERIOD = $self->{'BLOCK_PERIOD'};
-	
-	sleep($HUMAN_WAIT + int(rand($HUMAN_REFLEX))) if $HUMAN_BEHAVIOR;
-	
-	my $content = $response->content();
-	
-	# Login Page
-	if ($content =~ /<form method=post action="https:\/\/login.yahoo.com\/config\/login\?"/) {
-		my ($u) = $content =~ /<input type=hidden name=.u value="(.+?)" >/s;
-		my ($challenge) = $content =~ /<input type=hidden name=.challenge value="(.+?)" >/s;
-		my ($done) = $content =~ /<input type=hidden name=.done value="(.+?)">/;
-	
-		unless ($username) {
-			my ($slogin) = $content =~ /<input type=hidden name=".slogin" value="(.+?)" >/;
-			$username = $slogin if $slogin;
+	my ($url) = @_;
+
+	my ($album_id, $pic_id) = $url =~ m!/group/$GROUP/photos/album/(\d+)/pic/(\d+)/view!;
+
+	my $content = $client->fetch($url);
+
+	my ($img_url) = $content =~ m!<div id="spotlight" class="ygrp-photos-body-image".+?><img src="(.+?)"!s;
+	my ($profile, $user) = $content =~ m!<div id="ygrp-photos-by">.+?:&nbsp;<a\s+href="(.+?)">(.+?)<!s;
+	$user = decode_entities($user);
+	my ($photo_title) = $content =~ m!<div id="ygrp-photos-title">(.+?)</div>!s;
+	$photo_title = decode_entities($photo_title);
+	my ($file_name) = $content =~ m!<div id="ygrp-photos-filename">.+?:&nbsp;(.+?)<!s;
+	$file_name = decode_entities($file_name);
+	my ($file_ext) = $file_name =~ m!\.([^.]+)$!;
+	$file_ext ||= 'jpg';
+	$file_ext = decode_entities($file_ext);
+	my ($posted) = $content =~ m!<div id="ygrp-photos-posted">.+?:&nbsp;(.+?)<!s;
+	$posted = decode_entities($posted);
+	my ($resolution) = $content =~ m!<div id="ygrp-photos-resolution">.+?:&nbsp;(.+?)<!s;
+	$resolution = decode_entities($resolution);
+	my ($photo_size) = $content =~ m!<div id="ygrp-photos-size">.+?:&nbsp;(.+?)<!s;
+	$photo_size = decode_entities($photo_size);
+
+	$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'PICTURES'}->{$pic_id} = {
+					'USER' => $user,
+					'PROFILE' => $profile,
+					'PHOTO_TITLE' => $photo_title,
+					'FILE_NAME' => $file_name,
+					'POSTED' => $posted,
+					'RESOLUTION' => $resolution,
+					'SIZE' => $photo_size,
+					'FILE_EXT' => $file_ext,
+				};
+
+	opendir(AD, $GROUP . '/PHOTOS/' . $album_id) or die $GROUP . '/PHOTOS/' . $album_id . ': ' . $! . "\n";
+	while (my $entry = readdir(AD)) {
+		if ($entry =~ /^$pic_id\./) {
+			$logger->info('[' . $GROUP . '] ' . $self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_NAME'} . '/' . $pic_id . ' - exists (skipped)');
+			return;
 		}
-
-		unless ($BATCH_MODE) {
-			unless ($username) {
-				print "Enter username : ";
-				$username = <STDIN>;
-				chomp $username;
-			}
-		
-			unless ($password) {
-				use Term::ReadKey;
-				ReadMode('noecho');
-				print "Enter password : ";
-				$password = ReadLine(0);
-				ReadMode('restore');
-				chomp $password;
-			print "\n";
-			}
-		}
-		
-		return 'No username provided' unless $username;
-	
-		$request = POST 'http://login.yahoo.com/config/login?',
-			[
-			 '.tries' => '1',
-			 '.src'   => 'ygrp',
-			 '.md5'   => '',
-			 '.hash'  => '',
-			 '.js'    => '',
-			 '.last'  => '',
-			 'promo'  => '',
-			 '.intl'  => 'us',
-			 '.bypass' => '',
-			 '.partner' => '',
-			 '.u'     => $u,
-			 '.v'     => 0,
-			 '.challenge' => $challenge,
-			 '.yplus' => '',
-			 '.emailCode' => '',
-			 'pkg'    => '',
-			 'stepid' => '',
-			 '.ev'    => '',
-			 'hasMsgr' => 0,
-			 '.chkP'  => 'Y',
-			 '.done'  => $done,
-			 'login'  => $username,
-			 'passwd' => $password,
-			 '.persistent' => 'y',
-			 '.save'  => 'Sign In'
-			];
-		
-		$request->content_type('application/x-www-form-urlencoded');
-		$request->header('Accept' => '*/*');
-		$request->header('Allowed' => 'GET HEAD PUT');
-		$response = $ua->simple_request($request);
-		$cookie_jar->extract_cookies($response);
-		return "[http://login.yahoo.com/config/login] " . $response->as_string if $response->is_error;
-		
-		$result->{'REQUEST'} = $request;
-		$result->{'RESPONSE'} = $response;
-	
-		$content = $response->content();
 	}
-	
-	# Adult Confirmation Page
-	if ($content =~ /<form action="\/adultconf" method="post">/) {
-		return 'Adult Group confirmation required' unless $GETADULT;
-		my ($dest) = $content =~ /<input type="hidden" name="dest" value="(.+?)">/;
-		$request = POST 'http://groups.yahoo.com/adultconf',
-				[ 'dest'  => $dest,
-				  'accept' => 'I Accept'
-				];
-		$request->content_type('application/x-www-form-urlencoded');
-		$request->header('Accept' => '*/*');
-		$request->header('Allowed' => 'GET HEAD');
-		$response = $ua->simple_request($request);
-		$cookie_jar->extract_cookies($response);
-		return "[http://groups.yahoo.com/adultconf] " . $response->as_string if $response->is_error;
+	closedir AD;
 
-		$result->{'REQUEST'} = $request;
-		$result->{'RESPONSE'} = $response;
-	
-		$content = $response->content();
-	}
+	my $image = $client->fetch($img_url, $url, 1);
 
-	# Yahoo blocked for spamming
-	my $CYCLE = $self->{'CYCLE'}; # Blocking cycle currently running
+	$logger->info('[' . $GROUP . '] ' . $self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_NAME'} . '/' . $photo_title . " - $resolution px / $photo_size");
 
-	while($content =~ /Unfortunately, we are unable to process your request at this time/i) {
-		print STDERR "[$uri] Yahoo has blocked us, sleeping for " . $BLOCK_PERIOD*$CYCLE . " seconds\n" if $VERBOSE;
-		sleep($BLOCK_PERIOD*$CYCLE);
-		$response = $ua->simple_request($request);
-		$cookie_jar->extract_cookies($response);
-		return "[$uri] " . $response->as_string if $response->is_error;
+	open(IFD, '>', "$GROUP/PHOTOS/$album_id/$pic_id.$file_ext") or $logger->error("$GROUP/$album_id/$pic_id.$file_ext: $!") and return;
+	print IFD $image;
+	close IFD;
 
-		$content = $response->content();
-
-		$self->{'CYCLE'}++;
-
-		return;
-	}
-
-	$self->{'CYCLE'} = 0; # Reset blocking cycle currently running
-
-	$result->{'REQUEST'} = $request;
-	$result->{'RESPONSE'} = $response;
-
-	# Advertizement Page
-
-	if ($content =~ /Yahoo! Groups is an advertising supported service/ or $content =~ /Continue to message/s) {
-		$response = $ua->simple_request($request);
-		$cookie_jar->extract_cookies($response);
-		return "[$uri] " . $response->as_string if $response->is_error;
-
-		$result->{'REQUEST'} = $request;
-		$result->{'RESPONSE'} = $response;
-
-		$content = $response->content();
-	}
-
-	return $result;
+	$self->save_layout();
 }
-
 
 
 1;
