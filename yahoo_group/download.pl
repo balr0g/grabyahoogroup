@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.3 2010-09-11 16:37:03 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.4 2010-09-11 20:02:41 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
@@ -60,8 +60,19 @@ sub new {
 
 	die "Can't parse command line parameters" unless $result;
 
+	die 'Group name is mandatory' unless $GROUP;
+
+	mkdir $GROUP or die "$GROUP: $!\n" unless -d $GROUP;
+
+	unless ($USERNAME) {
+		opendir(UD, $GROUP) or die $GROUP . ': ' . $! . "\n";
+		while (my $record = readdir UD) { last if (($USERNAME) = $record =~ /^(.+)\.cookie$/); }
+		closedir UD;
+	}
+
 	my @terminals = GetTerminalSize(*STDOUT);
-	die 'Username not provided and not running in terminal' unless scalar @terminals;
+	die 'Username not provided and not running in terminal' unless $USERNAME and scalar @terminals;
+
 	unless ($USERNAME) {
 		print "Enter username : ";
 		$USERNAME = <STDIN>;
@@ -72,8 +83,6 @@ sub new {
 	foreach ($MESSAGES, $FILES, $PHOTOS, $MEMBERS) { $_ = 1 if $ALL; };
 
 	my $self = {};
-
-	mkdir $GROUP or die "$GROUP: $!\n" unless -d $GROUP;
 
 	$logger = new GrabYahoo::Logger($GROUP . '/GrabYahooGroup.log');
 
@@ -558,6 +567,15 @@ sub process_pic {
 
 	my ($album_id, $pic_id) = $url =~ m!/group/$GROUP/photos/album/(\d+)/pic/(\d+)/view!;
 
+	opendir(AD, $GROUP . '/PHOTOS/' . $album_id) or die $GROUP . '/PHOTOS/' . $album_id . ': ' . $! . "\n";
+	while (my $entry = readdir(AD)) {
+		if ($entry =~ /^$pic_id\./) {
+			$logger->info('[' . $GROUP . '] ' . $self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_NAME'} . '/' . $pic_id . ' - exists (skipped)');
+			return;
+		}
+	}
+	closedir AD;
+
 	my $content = $client->fetch($url);
 
 	my ($img_url) = $content =~ m!<div id="spotlight" class="ygrp-photos-body-image".+?><img src="(.+?)"!s;
@@ -587,15 +605,6 @@ sub process_pic {
 					'SIZE' => $photo_size,
 					'FILE_EXT' => $file_ext,
 				};
-
-	opendir(AD, $GROUP . '/PHOTOS/' . $album_id) or die $GROUP . '/PHOTOS/' . $album_id . ': ' . $! . "\n";
-	while (my $entry = readdir(AD)) {
-		if ($entry =~ /^$pic_id\./) {
-			$logger->info('[' . $GROUP . '] ' . $self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_NAME'} . '/' . $pic_id . ' - exists (skipped)');
-			return;
-		}
-	}
-	closedir AD;
 
 	my $image = $client->fetch($img_url, $url, 1);
 
