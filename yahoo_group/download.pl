@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.4 2010-09-11 20:02:41 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.5 2010-09-12 07:41:42 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
@@ -33,6 +33,7 @@ sub new {
 	# Which module to use ?
 	my $MESSAGES;
 	my $FILES;
+	my $ATTACHMENTS;
 	my $PHOTOS;
 	my $MEMBERS;
 
@@ -48,6 +49,7 @@ sub new {
 
 	my $result = GetOptions ('messages!' => \$MESSAGES,
 				 'files!' => \$FILES,
+				 'attachments!' => \$ATTACHMENTS,
 				 'photos!' => \$PHOTOS,
 				 'members!' => \$MEMBERS,
 				 'verbose!' => \$VERBOSE,
@@ -60,7 +62,15 @@ sub new {
 
 	die "Can't parse command line parameters" unless $result;
 
-	die 'Group name is mandatory' unless $GROUP;
+	my @terminals = GetTerminalSize(*STDOUT);
+
+	die 'Group name is mandatory' unless $GROUP or scalar @terminals;
+
+	unless ($GROUP) {
+		print "Group to download : ";
+		$GROUP = <STDIN>;
+		chomp $GROUP;
+	}
 
 	mkdir $GROUP or die "$GROUP: $!\n" unless -d $GROUP;
 
@@ -70,8 +80,7 @@ sub new {
 		closedir UD;
 	}
 
-	my @terminals = GetTerminalSize(*STDOUT);
-	die 'Username not provided and not running in terminal' unless $USERNAME and scalar @terminals;
+	die 'Username not provided and not running in terminal' unless $USERNAME or scalar @terminals;
 
 	unless ($USERNAME) {
 		print "Enter username : ";
@@ -79,8 +88,8 @@ sub new {
 		chomp $USERNAME;
 	}
 
-	foreach ($MESSAGES, $FILES, $PHOTOS, $MEMBERS) { $ALL = 0 if $_; };
-	foreach ($MESSAGES, $FILES, $PHOTOS, $MEMBERS) { $_ = 1 if $ALL; };
+	foreach ($MESSAGES, $FILES, $ATTACHMENTS, $PHOTOS, $MEMBERS) { $ALL = 0 if $_; };
+	foreach ($MESSAGES, $FILES, $ATTACHMENTS, $PHOTOS, $MEMBERS) { $_ = 1 if $ALL; };
 
 	my $self = {};
 
@@ -92,10 +101,11 @@ sub new {
 
 	$logger->info('Detecting server capabilities');
 	# Detect capabilities
-	$MESSAGES = ($MESSAGES and $content =~ m!<a href="/group/$GROUP/messages">.+?</a>!s) ? 1: 0;
-	$FILES = ($FILES and $content =~ m!<a href="/group/$GROUP/files">.+?</a>!s) ? 1: 0;
-	$PHOTOS = ($PHOTOS and $content =~ m!<a href="http://.+?/group/$GROUP/photos">.+?</a>!s) ? 1: 0;
-	$MEMBERS = ($MEMBERS and $content =~ m!<a href="/group/$GROUP/members">.+?</a>!s) ? 1: 0;
+	$MESSAGES = ($MESSAGES and $content =~ m!<a href="/group/$GROUP/messages">!s) ? 1: 0;
+	$FILES = ($FILES and $content =~ m!<a href="/group/$GROUP/files">!s) ? 1: 0;
+	$ATTACHMENTS = ($ATTACHMENTS and $content =~ m!<a class="sublink" href="/group/$GROUP/attachments/folder/0/list">!s) ? 1: 0;
+	$PHOTOS = ($PHOTOS and $content =~ m!<a href="http://.+?/group/$GROUP/photos">!s) ? 1: 0;
+	$MEMBERS = ($MEMBERS and $content =~ m!<a href="/group/$GROUP/members">!s) ? 1: 0;
 
 	if ($MESSAGES) {
 		$logger->info('MESSAGES enabled');
@@ -110,6 +120,16 @@ sub new {
 	if ($FILES) {
 		$logger->info('FILES enabled');
 		my $object = eval { new GrabYahoo::Files; };
+		if ($@) {
+			$logger->error( $@ );
+		} else {
+			push @{ $self->{'SECTIONS'} }, $object;
+		}
+	}
+
+	if ($ATTACHMENTS) {
+		$logger->info('ATTACHMENTS enabled');
+		my $object = eval { new GrabYahoo::Attachments; };
 		if ($@) {
 			$logger->error( $@ );
 		} else {
@@ -137,7 +157,7 @@ sub new {
 		}
 	}
 
-	die 'Group homepage has no valid sections' unless $self->{'SECTIONS'};
+	$logger->warn('Group homepage has no valid sections') unless $self->{'SECTIONS'};
 
 	return bless $self;
 }
@@ -199,8 +219,6 @@ sub fetch {
 	my $ua = $self->ua();
 	my $cookie_jar = $self->cookie_jar();
 
-	my $SLEEP_COUNT = 1;
-
 	$url = $self->get_absurl($url);
 	$referrer = $self->get_absurl($referrer) if $referrer;
 
@@ -215,11 +233,10 @@ sub fetch {
 	die '[' . $url . '] ' . $response->as_string() if $response->is_error();
 	my $content = $response->content();
 
-	while($response->code() == 999 or $content =~ /Unfortunately, we are unable to process your request at this time/i) {
-		$logger->debug($response->code());
-		$logger->warn('Yahoo SPAM block - trying to check after ' . $SLEEP_COUNT . ' hours');
-		sleep 60*60*$SLEEP_COUNT;
-		$content = $self->fetch($url);
+	if(my ($message) = $content =~ m!<div class="ygrp-errors">(.+?)</div>!s) {
+		$message =~ s!<.+?>!!sg;
+		$message =~ s!&.+?;!!sg;
+		$logger->error($message);
 	}
 
 	if ($content =~ /Yahoo! Groups is an advertising supported service/ or $content =~ /Continue to message/s) {
@@ -452,6 +469,167 @@ sub process_folder {
 }
 
 
+package GrabYahoo::Attachments;
+
+use Data::Dumper;
+use HTML::Entities;
+
+sub new {
+	my $self = {};
+	if (-f $GROUP . '/MESSAGES/ATTACHMENTS/layout.dump') {
+		my $buf = $/;
+		$/ = undef;
+		open(LAY, '<', $GROUP . '/MESSAGES/ATTACHMENTS/layout.dump') or die $GROUP . '/PHOTOS/layout.dump' . $! . "\n";
+		my $dump = <LAY>;
+		close LAY;
+		$/ = $buf;
+		my $VAR1;
+		eval $dump;
+		$self->{'LAYOUT'} = $VAR1;
+	}
+	return bless $self;
+}
+
+
+sub save_layout {
+	my $self = shift;
+
+	my $LAYOUT = $self->{'LAYOUT'};
+
+	return unless $LAYOUT;
+
+	my $layout = Data::Dumper->Dump([$LAYOUT]);
+	open (LAY, '>', $GROUP . '/MESSAGES/ATTACHMENTS/layout.dump') or die $GROUP . '/MESSAGES/ATTACHMENTS/layout.dump: ' . $! . "\n";
+	print LAY $layout;
+	close LAY;
+}
+
+
+sub process {
+	my $self = shift;
+	$logger->info('Processing ATTACHMENTS');
+	mkdir $GROUP . '/MESSAGES' or die "$GROUP/MESSAGES: $!\n" unless -d $GROUP . '/MESSAGES';
+	mkdir $GROUP . '/MESSAGES/ATTACHMENTS' or die "$GROUP/MESSAGES/ATTACHMENTS: $!\n" unless -d $GROUP . '/MESSAGES/ATTACHMENTS';
+	my $start = 1;
+	my $next_page = 1;
+	while ($next_page) {
+		$next_page = $self->process_folder(qq{/group/$GROUP/attachments/folder/0/list?mode=list&order=mtime&start=$start&count=20&dir=desc});
+		$start += 20;
+	}
+
+	$self->save_layout();
+}
+
+
+sub process_folder {
+	my $self = shift;
+	my ($url) = @_;
+
+	my $content = $client->fetch($url);
+
+	while ($content =~ m!<a href="(/group/$GROUP/attachments/folder/\d+/item/\d+/view)!sg) { $self->process_pic($1 . '?picmode=original&mode=list&order=ordinal&start=1&dir=asc'); };
+
+	while ($content =~ m!<tr class="ygrp-photos-list-row hbox">\s+(<td .+?</td>)\s+</tr>!sg) {
+		my $record = $1;
+		next if $record =~ / header /s;
+		my ($folder_url, $folder_id, $folder_name) = $record =~ m!<a href="(/group/$GROUP/attachments/folder/(\d+)/item/list)">(.+?)</a>!sg;
+		$folder_name = decode_entities($folder_name);
+		my ($number_attachments) = $record =~ m!<td class="ygrp-photos-attachments ">\s+(\d+)</td>!s;
+		my ($folder_creator) = $record =~ m!<td class="ygrp-photos-author ">(.+?)</td>!s;
+		my $creator_profile;
+		($creator_profile, $folder_creator) = $folder_creator =~ m!<a\s+href="(.+?)">(.+?)</a>!s if $folder_creator =~ /href/;
+		$folder_creator = decode_entities($folder_creator);
+		my ($create_date) = $record =~ m!<td class="ygrp-photos-date selected">\s+(.+?)</td>!s;
+		my ($message) = $record =~ m!<td class="ygrp-photos-view-original">\s+<a href="(.+?)"+?>!s;
+		$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} = $folder_name;
+		$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'NUMBER_ATTACHMENTS'} = $number_attachments;
+		$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'CREATOR_PROFILE'} = $creator_profile || '';
+		$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_CREATOR'} = $folder_creator;
+		$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'CREATE_DATE'} = $create_date;
+		$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'MESSAGE'} = $message;
+		$logger->info('[' . $GROUP . '] ' . $folder_name);
+		mkdir $GROUP . '/MESSAGES/ATTACHMENTS/' . $folder_id or die "$GROUP/MESSAGES/ATTACHMENTS/$folder_id: $!\n" unless -d $GROUP . '/MESSAGES/ATTACHMENTS/' . $folder_id;
+		my $start = 1;
+		my $next_page = 1;
+		while ($next_page) {
+			$next_page = $self->process_folder($folder_url . qq#?mode=list&order=mtime&start=1&count=20&dir=desc#);
+			$start += 20;
+		}
+	};
+	my $more_pages = 0;
+	$more_pages = 1 if $content =~ m!<a href="/group/$GROUP/attachments/folder/\d+/list.+?">Next<!sg;
+
+	$self->save_layout();
+
+	return $more_pages;
+}
+
+
+sub process_pic {
+	my $self = shift;
+	my ($url) = @_;
+
+	my ($folder_id, $pic_id) = $url =~ m!/group/$GROUP/attachments/folder/(\d+)/item/(\d+)/view!;
+
+	my $content = $client->fetch($url);
+
+	my ($img_url) = $content =~ m!<div class="ygrp-photos-body-image".+?>\s+<img src="(.+?)"!s;
+	my ($profile, $user) = $content =~ m!<div id="ygrp-photos-by">.+?:&nbsp;<a\s+href="(.+?)">(.+?)<!s;
+	$user = decode_entities($user);
+	my ($photo_title) = $content =~ m!<div id="ygrp-photos-title">(.+?)</div>!s;
+	$photo_title = decode_entities($photo_title);
+	my ($file_name) = $content =~ m!<div id="ygrp-photos-filename">.+?:&nbsp;(.+?)<!s;
+	$file_name = decode_entities($file_name);
+	my ($file_ext) = $file_name =~ m!\.([^.]+)$!;
+	$file_ext ||= 'jpg';
+	$file_ext = decode_entities($file_ext);
+	my ($posted) = $content =~ m!<div id="ygrp-photos-posted">.+?:&nbsp;(.+?)<!s;
+	$posted = decode_entities($posted);
+	my ($resolution) = $content =~ m!<div id="ygrp-photos-resolution">.+?:&nbsp;(.+?)<!s;
+	$resolution = decode_entities($resolution);
+	my ($photo_size) = $content =~ m!<div id="ygrp-photos-size">.+?:&nbsp;(.+?)<!s;
+	$photo_size = decode_entities($photo_size);
+
+	$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id} = {
+					'USER' => $user,
+					'PROFILE' => $profile,
+					'PHOTO_TITLE' => $photo_title,
+					'FILE_NAME' => $file_name,
+					'POSTED' => $posted,
+					'RESOLUTION' => $resolution,
+					'SIZE' => $photo_size,
+					'FILE_EXT' => $file_ext,
+				};
+
+	my $skip = 0;
+	opendir(AD, $GROUP . '/MESSAGES/ATTACHMENTS/' . $folder_id) or die $GROUP . '/MESSAGES/ATTACHMENTS/' . $folder_id . ': ' . $! . "\n";
+	while (my $entry = readdir(AD)) {
+		if ($entry =~ /^$pic_id\./) {
+			$logger->info('[' . $GROUP . '] ' . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . '/' . $pic_id . ' - exists (skipped)');
+			$skip = 1;
+			last;
+		}
+	}
+	closedir AD;
+
+	unless ($skip) {
+		my $image = $client->fetch($img_url, $url, 1);
+
+		$logger->info('[' . $GROUP . '] ' . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . '/' . $photo_title . " - $resolution px / $photo_size");
+
+		open(IFD, '>', "$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.$file_ext") or $logger->error("$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.$file_ext: $!") and return;
+		print IFD $image;
+		close IFD;
+
+		$self->save_layout();
+	}
+
+	if (my ($pic_url) = $content =~ m!<a href="(/group/$GROUP/attachments/folder/$folder_id/item/\d+/view).+?">Next&gt;!) {
+		$self->process_pic($pic_url . '?picmode=original&mode=list&order=ordinal&start=1&dir=asc');
+	}
+}
+
+
 package GrabYahoo::Members;
 
 
@@ -490,7 +668,6 @@ sub new {
 
 sub save_layout {
 	my $self = shift;
-	my ($final) = @_;
 
 	my $LAYOUT = $self->{'LAYOUT'};
 
@@ -506,15 +683,15 @@ sub save_layout {
 sub process {
 	my $self = shift;
 	$logger->info('Processing PHOTOS');
+	mkdir $GROUP . '/PHOTOS' or die "$GROUP/PHOTOS: $!\n" unless -d $GROUP . '/PHOTOS';
 	my $start = 1;
 	my $next_page = 1;
-	mkdir $GROUP . '/PHOTOS' or die "$GROUP/PHOTOS: $!\n" unless -d $GROUP . '/PHOTOS';
 	while ($next_page) {
 		$next_page = $self->process_album(qq{/group/$GROUP/photos/album/0/list?mode=list&order=mtime&start=$start&count=20&dir=desc});
 		$start += 20;
 	}
 
-	$self->save_layout(1);
+	$self->save_layout();
 }
 
 
@@ -523,8 +700,6 @@ sub process_album {
 	my ($url) = @_;
 
 	my $content = $client->fetch($url);
-
-	my $more_pages = 0;
 
 	while ($content =~ m!<a href="(/group/$GROUP/photos/album/\d+/pic/\d+/view)!sg) { $self->process_pic($1 . '?picmode=original&mode=list&order=ordinal&start=1&dir=asc'); };
 
@@ -553,6 +728,7 @@ sub process_album {
 		}
 	};
 
+	my $more_pages = 0;
 	$more_pages = 1 if $content =~ m!<a href="(/group/$GROUP/photos/album/(\d+)/pic/list).*?>Next<!sg;
 
 	$self->save_layout();
@@ -610,7 +786,7 @@ sub process_pic {
 
 	$logger->info('[' . $GROUP . '] ' . $self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_NAME'} . '/' . $photo_title . " - $resolution px / $photo_size");
 
-	open(IFD, '>', "$GROUP/PHOTOS/$album_id/$pic_id.$file_ext") or $logger->error("$GROUP/$album_id/$pic_id.$file_ext: $!") and return;
+	open(IFD, '>', "$GROUP/PHOTOS/$album_id/$pic_id.$file_ext") or $logger->error("$GROUP/PHOTOS/$album_id/$pic_id.$file_ext: $!") and return;
 	print IFD $image;
 	close IFD;
 
