@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.5 2010-09-12 07:41:42 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.6 2010-09-17 06:06:35 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
@@ -36,8 +36,7 @@ sub new {
 	my $ATTACHMENTS;
 	my $PHOTOS;
 	my $MEMBERS;
-
-	my $VERBOSE = 1;
+	my $ALL;
 
 	my $USERNAME = '';
 	my $PASSWORD = '';
@@ -45,19 +44,21 @@ sub new {
 	my $BEGIN_MSGID;
 	my $END_MSGID;
 
-	my $ALL = 1;
+	my $FORCE_GET;
+
 
 	my $result = GetOptions ('messages!' => \$MESSAGES,
 				 'files!' => \$FILES,
 				 'attachments!' => \$ATTACHMENTS,
 				 'photos!' => \$PHOTOS,
 				 'members!' => \$MEMBERS,
-				 'verbose!' => \$VERBOSE,
+				 'all' => \$ALL,
 				 'begin=i' => \$BEGIN_MSGID,
 				 'end=i' => \$END_MSGID,
 				 'username=s' => \$USERNAME,
 				 'password=s' => \$PASSWORD,
 				 'group=s' => \$GROUP,
+				 'forceget' => \$FORCE_GET,
 				);
 
 	die "Can't parse command line parameters" unless $result;
@@ -75,7 +76,7 @@ sub new {
 	mkdir $GROUP or die "$GROUP: $!\n" unless -d $GROUP;
 
 	unless ($USERNAME) {
-		opendir(UD, $GROUP) or die $GROUP . ': ' . $! . "\n";
+		opendir(UD, $GROUP) or die qq/$GROUP: $!\n/;
 		while (my $record = readdir UD) { last if (($USERNAME) = $record =~ /^(.+)\.cookie$/); }
 		closedir UD;
 	}
@@ -88,12 +89,13 @@ sub new {
 		chomp $USERNAME;
 	}
 
-	foreach ($MESSAGES, $FILES, $ATTACHMENTS, $PHOTOS, $MEMBERS) { $ALL = 0 if $_; };
 	foreach ($MESSAGES, $FILES, $ATTACHMENTS, $PHOTOS, $MEMBERS) { $_ = 1 if $ALL; };
 
 	my $self = {};
 
-	$logger = new GrabYahoo::Logger($GROUP . '/GrabYahooGroup.log');
+	$logger = new GrabYahoo::Logger(qq{$GROUP/GrabYahooGroup.log});
+	$logger->group($GROUP);
+	$logger->section(' ');
 
 	$client = new GrabYahoo::Client($USERNAME, $PASSWORD);
 
@@ -119,7 +121,7 @@ sub new {
 
 	if ($FILES) {
 		$logger->info('FILES enabled');
-		my $object = eval { new GrabYahoo::Files; };
+		my $object = eval { new GrabYahoo::Files($FORCE_GET); };
 		if ($@) {
 			$logger->error( $@ );
 		} else {
@@ -129,7 +131,7 @@ sub new {
 
 	if ($ATTACHMENTS) {
 		$logger->info('ATTACHMENTS enabled');
-		my $object = eval { new GrabYahoo::Attachments; };
+		my $object = eval { new GrabYahoo::Attachments($FORCE_GET); };
 		if ($@) {
 			$logger->error( $@ );
 		} else {
@@ -139,7 +141,7 @@ sub new {
 
 	if ($PHOTOS) {
 		$logger->info('PHOTOS enabled');
-		my $object = eval { new GrabYahoo::Photos; };
+		my $object = eval { new GrabYahoo::Photos($FORCE_GET); };
 		if ($@) {
 			$logger->error( $@ );
 		} else {
@@ -149,7 +151,7 @@ sub new {
 
 	if ($MEMBERS) {
 		$logger->info('MEMBERS enabled');
-		my $object = eval { new GrabYahoo::Members; };
+		my $object = eval { new GrabYahoo::Members($FORCE_GET); };
 		if ($@) {
 			$logger->error( $@ );
 		} else {
@@ -200,7 +202,7 @@ sub new {
 	my $cookie_jar = HTTP::Cookies->new( 'file' => $cookie_file );
 	$cookie_jar->load();
 	$ua->cookie_jar($cookie_jar);
-	my $response = $ua->simple_request(GET 'http://groups.yahoo.com/group/' . $GROUP);
+	my $response = $ua->simple_request(GET qq{http://groups.yahoo.com/group/$GROUP});
 	$self->response($response);
 
 	$self->ua($ua);
@@ -230,8 +232,28 @@ sub fetch {
 	$cookie_jar->save();
 	$self->response($response) unless $is_image;
 
-	die '[' . $url . '] ' . $response->as_string() if $response->is_error();
 	my $content = $response->content();
+
+	if ($response->is_error()) {
+		if ($response->code() == 503) {
+			$logger->warn(': Document Not Accessible - report to Yahoo');
+			$self->error_count();
+			$logger->info('Sleeping for 5 min');
+			sleep 5*60;
+			$content = $client->fetch($url);
+		} else {
+			die qq/[$url] / . $response->as_string() if $response->is_error();
+		}
+	}
+
+	if ($content =~ /error 999/s) {
+		$logger->error('Yahoo quota block kicked in');
+		$self->error_count();
+		$logger->warn(qq/Sleeping for two hours/);
+		$logger->info('Next check on ' . localtime(time() + 2*60*60));
+		sleep(2*60*60);
+		$content = $self->fetch($url);
+	}
 
 	if(my ($message) = $content =~ m!<div class="ygrp-errors">(.+?)</div>!s) {
 		$message =~ s!<.+?>!!sg;
@@ -263,7 +285,7 @@ sub fetch {
 			$redirect =~ s/"//g;
 			$redirect =~ s/'//g;
 		}
-		if ($url =~ m!errors/framework_error!) {
+		if ($redirect =~ m!errors/framework_error!) {
 			$logger->warn('Yahoo framework error');
 			$logger->info('Sleeping for 5 seconds');
 			sleep 5;
@@ -272,7 +294,7 @@ sub fetch {
 			$self->error_count();
 		}
 		$url = $self->get_absurl($redirect);
-		$logger->info('Redirected to: ' . $url);
+		$logger->info(qq/Redirected to: $url/);
 		$content = $self->fetch($url);
 	}
 
@@ -286,6 +308,7 @@ sub error_count {
 	my $self = shift;
 	$self->{'ERROR_COUNTER'}++;
 	die 'Too many errors from server' if $self->{'ERROR_COUNTER'} > 10;
+	return $self->{'ERROR_COUNTER'};
 }
 
 
@@ -390,7 +413,7 @@ sub process_loginform {
 	$cookie_jar->extract_cookies($response);
 	$self->response($response);
 
-	die '[' . $post . '] ' . $response->as_string() if $response->is_error();
+	die qq/[$post] / . $response->as_string() if $response->is_error();
 
 	return $response->content();
 }
@@ -406,11 +429,23 @@ sub new {
 	my $self = {};
 	my ($logfile) = @_;
 
+	my @accessors = ('group', 'section');
+	no strict 'refs';
+	foreach my $accessor (@accessors) {
+		*$accessor = sub {
+			my $self = shift;
+			my ($data) = @_;
+			$self->{uc($accessor)} = $data if $data;
+			return $self->{uc($accessor)};
+		};
+	}
+	use strict;
+
 	my @terminals = GetTerminalSize(*STDOUT);
 	$self->{'HANDLES'} = [ *STDOUT ] if scalar @terminals;
 
 	my $file_handle;
-	open ($file_handle, ">>", $logfile) or die $logfile . ": $!\n";
+	open ($file_handle, ">>", $logfile) or die qq/$logfile: $!\n/;
 	push @{ $self->{'HANDLES'} }, $file_handle;
 
 	# Various loggers
@@ -418,7 +453,12 @@ sub new {
 	no strict 'refs';
 	foreach my $level (@loggers) {
 		my $tag = uc($level);
-		*$level = sub {my $self = shift; $self->dispatch("[$tag]", @_, "\n"); };
+		*$level = sub {
+			my $self = shift;
+			my $group = $self->group();
+			my $section = $self->section();
+			$self->dispatch(qq/[$tag]/, qq/[$GROUP]/, qq/[$section]/, @_, "\n");
+		};
 	}
 	use strict;
 
@@ -444,28 +484,69 @@ sub new {
 
 
 sub process {
+	$logger->section('Messages');
 	$logger->info('Processing MESSAGES');
 }
 
 
 package GrabYahoo::Files;
 
+use HTML::Entities;
+
 
 sub new {
-	my $self = {};
-	return bless $self;
+	my $package = shift;
+	my ($force) = @_;
+	return bless {'FORCE_GET' => $force};
 }
 
 
 sub process {
 	my $self = shift;
+	$logger->section('Files');
 	$logger->info('Processing FILES');
-	mkdir $GROUP . '/FILES' or die "$GROUP/FILES: $!\n" unless -d $GROUP . '/FILES';
+	mkdir qq{$GROUP/FILES} or die qq{$GROUP/FILES: $!\n} unless -d qq{$GROUP/FILES};
 	$self->process_folder(qq{/group/$GROUP/files});
 }
 
 
 sub process_folder {
+	my $self = shift;
+	my ($url) = @_;
+
+	my $force = $self->{'FORCE_GET'};
+
+	my ($folder) = $url =~ m{/files/(.+?)$};
+	$folder = '/' unless $folder;
+	# unescape URI
+	$folder =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/eg;
+
+	$logger->info($folder);
+	mkdir qq{$GROUP/FILES/$folder} or die qq{$GROUP/FILES/$folder: $!\n} unless -d qq{$GROUP/FILES/$folder};
+
+	my $content = $client->fetch($url);
+
+	my ($body) = $content =~ m{<!-- start content include -->\s+(<div .+?</div>)\s+<!-- end content include -->}s;
+
+	while ($body =~ m!<span class="title">\s+<a href="(.+?)">(.+?)</a>\s+</span>!sg) {
+		my $link = $1;
+		my $description = $2;
+		$description = decode_entities($description);
+		if ($link =~ m!/group/$GROUP/files/!) {
+			$self->process_folder($link);
+		} else {
+			if (!$force and -f qq{$GROUP/FILES/$folder$description}) {
+				$logger->info(qq{$folder$description - exists [skipped]});
+				next;
+			}
+			$logger->info($folder . $description);
+			my $file = $client->fetch($link, $url, 1);
+			next unless $file;
+			open(ID, '>', qq{$GROUP/FILES/$folder$description}) or die qq{$GROUP/FILES/$folder$description: $!\n};
+			print ID $file;
+			close ID;
+		}
+	}
 }
 
 
@@ -475,11 +556,13 @@ use Data::Dumper;
 use HTML::Entities;
 
 sub new {
-	my $self = {};
-	if (-f $GROUP . '/MESSAGES/ATTACHMENTS/layout.dump') {
+	my $package = shift;
+	my ($force) = @_;
+	my $self = {'FORCE_GET' => $force};
+	if (-f qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump}) {
 		my $buf = $/;
 		$/ = undef;
-		open(LAY, '<', $GROUP . '/MESSAGES/ATTACHMENTS/layout.dump') or die $GROUP . '/PHOTOS/layout.dump' . $! . "\n";
+		open(LAY, '<', qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump}) or die qq{$GROUP/PHOTOS/layout.dump: $!\n};
 		my $dump = <LAY>;
 		close LAY;
 		$/ = $buf;
@@ -499,7 +582,7 @@ sub save_layout {
 	return unless $LAYOUT;
 
 	my $layout = Data::Dumper->Dump([$LAYOUT]);
-	open (LAY, '>', $GROUP . '/MESSAGES/ATTACHMENTS/layout.dump') or die $GROUP . '/MESSAGES/ATTACHMENTS/layout.dump: ' . $! . "\n";
+	open (LAY, '>', qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump}) or die qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump: $!\n};
 	print LAY $layout;
 	close LAY;
 }
@@ -507,9 +590,10 @@ sub save_layout {
 
 sub process {
 	my $self = shift;
+	$logger->section('Attachments');
 	$logger->info('Processing ATTACHMENTS');
-	mkdir $GROUP . '/MESSAGES' or die "$GROUP/MESSAGES: $!\n" unless -d $GROUP . '/MESSAGES';
-	mkdir $GROUP . '/MESSAGES/ATTACHMENTS' or die "$GROUP/MESSAGES/ATTACHMENTS: $!\n" unless -d $GROUP . '/MESSAGES/ATTACHMENTS';
+	mkdir qq{$GROUP/MESSAGES} or die qq{$GROUP/MESSAGES: $!\n} unless -d qq{$GROUP/MESSAGES};
+	mkdir qq{$GROUP/MESSAGES/ATTACHMENTS} or die qq{$GROUP/MESSAGES/ATTACHMENTS: $!\n} unless -d qq{$GROUP/MESSAGES/ATTACHMENTS};
 	my $start = 1;
 	my $next_page = 1;
 	while ($next_page) {
@@ -524,6 +608,8 @@ sub process {
 sub process_folder {
 	my $self = shift;
 	my ($url) = @_;
+
+	my $force = $self->{'FORCE_GET'};
 
 	my $content = $client->fetch($url);
 
@@ -547,12 +633,13 @@ sub process_folder {
 		$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_CREATOR'} = $folder_creator;
 		$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'CREATE_DATE'} = $create_date;
 		$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'MESSAGE'} = $message;
-		$logger->info('[' . $GROUP . '] ' . $folder_name);
-		mkdir $GROUP . '/MESSAGES/ATTACHMENTS/' . $folder_id or die "$GROUP/MESSAGES/ATTACHMENTS/$folder_id: $!\n" unless -d $GROUP . '/MESSAGES/ATTACHMENTS/' . $folder_id;
+		$logger->info($folder_name);
+		next if !$force and $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'} and ($number_attachments == scalar (keys %{$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}}) );
+		mkdir qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id} or die qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id: $!\n} unless -d qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id};
 		my $start = 1;
 		my $next_page = 1;
 		while ($next_page) {
-			$next_page = $self->process_folder($folder_url . qq#?mode=list&order=mtime&start=1&count=20&dir=desc#);
+			$next_page = $self->process_folder($folder_url . qq#?mode=list&order=mtime&start=$start&count=20&dir=desc#);
 			$start += 20;
 		}
 	};
@@ -568,6 +655,8 @@ sub process_folder {
 sub process_pic {
 	my $self = shift;
 	my ($url) = @_;
+
+	my $force = $self->{'FORCE_GET'};
 
 	my ($folder_id, $pic_id) = $url =~ m!/group/$GROUP/attachments/folder/(\d+)/item/(\d+)/view!;
 
@@ -601,32 +690,22 @@ sub process_pic {
 					'FILE_EXT' => $file_ext,
 				};
 
-	my $skip = 0;
-	opendir(AD, $GROUP . '/MESSAGES/ATTACHMENTS/' . $folder_id) or die $GROUP . '/MESSAGES/ATTACHMENTS/' . $folder_id . ': ' . $! . "\n";
-	while (my $entry = readdir(AD)) {
-		if ($entry =~ /^$pic_id\./) {
-			$logger->info('[' . $GROUP . '] ' . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . '/' . $pic_id . ' - exists (skipped)');
-			$skip = 1;
-			last;
-		}
-	}
-	closedir AD;
-
-	unless ($skip) {
-		my $image = $client->fetch($img_url, $url, 1);
-
-		$logger->info('[' . $GROUP . '] ' . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . '/' . $photo_title . " - $resolution px / $photo_size");
-
-		open(IFD, '>', "$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.$file_ext") or $logger->error("$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.$file_ext: $!") and return;
-		print IFD $image;
-		close IFD;
-
-		$self->save_layout();
+	if (!$force and $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id} and
+		-f qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.} . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'}) {
+			$logger->info($self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . '/' .
+				$pic_id . '.' . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'} . ' - exists (skipped)');
+			return;
 	}
 
-	if (my ($pic_url) = $content =~ m!<a href="(/group/$GROUP/attachments/folder/$folder_id/item/\d+/view).+?">Next&gt;!) {
-		$self->process_pic($pic_url . '?picmode=original&mode=list&order=ordinal&start=1&dir=asc');
-	}
+	my $image = $client->fetch($img_url, $url, 1);
+
+	$logger->info($self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . qq{/$photo_title - $resolution px / $photo_size});
+
+	open(IFD, '>', qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.$file_ext}) or $logger->error(qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.$file_ext: $!}) and return;
+	print IFD $image;
+	close IFD;
+
+	$self->save_layout();
 }
 
 
@@ -634,12 +713,14 @@ package GrabYahoo::Members;
 
 
 sub new {
-	my $self = {};
-	return bless $self;
+	my $package = shift;
+	my ($force) = @_;
+	return bless {'FORCE_GET' => $force};
 }
 
 
 sub process {
+	$logger->section('Members');
 	$logger->info('Processing MEMBERS');
 }
 
@@ -650,11 +731,13 @@ use Data::Dumper;
 use HTML::Entities;
 
 sub new {
-	my $self = {};
-	if (-f $GROUP . '/PHOTOS/layout.dump') {
+	my $package = shift;
+	my ($force) = @_;
+	my $self = {'FORCE_GET' => $force};
+	if (-f qq{$GROUP/PHOTOS/layout.dump}) {
 		my $buf = $/;
 		$/ = undef;
-		open(LAY, '<', $GROUP . '/PHOTOS/layout.dump') or die $GROUP . '/PHOTOS/layout.dump' . $! . "\n";
+		open(LAY, '<', qq{$GROUP/PHOTOS/layout.dump}) or die qq{$GROUP/PHOTOS/layout.dump: $!\n};
 		my $dump = <LAY>;
 		close LAY;
 		$/ = $buf;
@@ -674,7 +757,7 @@ sub save_layout {
 	return unless $LAYOUT;
 
 	my $layout = Data::Dumper->Dump([$LAYOUT]);
-	open (LAY, '>', $GROUP . '/PHOTOS/layout.dump') or die $GROUP . '/PHOTOS/layout.xml: ' . $! . "\n";
+	open (LAY, '>', qq{$GROUP/PHOTOS/layout.dump}) or die qq{$GROUP/PHOTOS/layout.xml: $!\n};
 	print LAY $layout;
 	close LAY;
 }
@@ -682,8 +765,9 @@ sub save_layout {
 
 sub process {
 	my $self = shift;
+	$logger->section('Photos');
 	$logger->info('Processing PHOTOS');
-	mkdir $GROUP . '/PHOTOS' or die "$GROUP/PHOTOS: $!\n" unless -d $GROUP . '/PHOTOS';
+	mkdir qq{$GROUP/PHOTOS} or die "$GROUP/PHOTOS: $!\n" unless -d qq{$GROUP/PHOTOS};
 	my $start = 1;
 	my $next_page = 1;
 	while ($next_page) {
@@ -718,10 +802,10 @@ sub process_album {
 		$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_CREATOR'} = $album_creator;
 		$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'NUMBER_PHOTOS'} = $number_photos;
 		$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'LAST_MODIFIED'} = $last_modified;
-		$logger->info('[' . $GROUP . '] ' . $album_name);
+		$logger->info($album_name);
 		my $start = 1;
 		my $next_page = 1;
-		mkdir $GROUP . '/PHOTOS/' . $album_id or die "$GROUP/PHOTOS/$album_id: $!\n" unless -d $GROUP . '/PHOTOS/' . $album_id;
+		mkdir qq{$GROUP/PHOTOS/$album_id} or die qq{$GROUP/PHOTOS/$album_id: $!\n} unless -d qq{$GROUP/PHOTOS/$album_id};
 		while ($next_page) {
 			$next_page = $self->process_album($album_url . qq#?mode=list&order=mtime&start=$start&count=20&dir=desc#);
 			$start += 20;
@@ -741,16 +825,16 @@ sub process_pic {
 	my $self = shift;
 	my ($url) = @_;
 
+	my $force = $self->{'FORCE_GET'};
+
 	my ($album_id, $pic_id) = $url =~ m!/group/$GROUP/photos/album/(\d+)/pic/(\d+)/view!;
 
-	opendir(AD, $GROUP . '/PHOTOS/' . $album_id) or die $GROUP . '/PHOTOS/' . $album_id . ': ' . $! . "\n";
-	while (my $entry = readdir(AD)) {
-		if ($entry =~ /^$pic_id\./) {
-			$logger->info('[' . $GROUP . '] ' . $self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_NAME'} . '/' . $pic_id . ' - exists (skipped)');
+	if (!$force and $self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'PICTURES'}->{$pic_id} and
+		-f qq{$GROUP/PHOTOS/$album_id/$pic_id.} . $self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'PICTURES'}->{$pic_id}->{'FILE_EXT'}) {
+			$logger->info($self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_NAME'} . '/' .
+				$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'PICTURES'}->{$pic_id}->{'PHOTO_TITLE'} . ' - exists (skipped)');
 			return;
-		}
 	}
-	closedir AD;
 
 	my $content = $client->fetch($url);
 
@@ -784,7 +868,7 @@ sub process_pic {
 
 	my $image = $client->fetch($img_url, $url, 1);
 
-	$logger->info('[' . $GROUP . '] ' . $self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_NAME'} . '/' . $photo_title . " - $resolution px / $photo_size");
+	$logger->info($self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_NAME'} . qq{/$photo_title - $resolution px / $photo_size});
 
 	open(IFD, '>', "$GROUP/PHOTOS/$album_id/$pic_id.$file_ext") or $logger->error("$GROUP/PHOTOS/$album_id/$pic_id.$file_ext: $!") and return;
 	print IFD $image;
