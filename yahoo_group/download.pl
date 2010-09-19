@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.6 2010-09-17 06:06:35 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.7 2010-09-19 06:05:27 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
@@ -46,6 +46,9 @@ sub new {
 
 	my $FORCE_GET;
 
+	my $QUIET = 1;
+	my $VERBOSE = 0;
+
 
 	my $result = GetOptions ('messages!' => \$MESSAGES,
 				 'files!' => \$FILES,
@@ -59,6 +62,8 @@ sub new {
 				 'password=s' => \$PASSWORD,
 				 'group=s' => \$GROUP,
 				 'forceget' => \$FORCE_GET,
+				 'quiet+' => \$QUIET,
+				 'verbose+' => \$VERBOSE,
 				);
 
 	die "Can't parse command line parameters" unless $result;
@@ -93,7 +98,12 @@ sub new {
 
 	my $self = {};
 
-	$logger = new GrabYahoo::Logger(qq{$GROUP/GrabYahooGroup.log});
+	if ($VERBOSE > $QUIET) {
+		$QUIET = 0;
+	} else {
+		$QUIET -= $VERBOSE;
+	}
+	$logger = new GrabYahoo::Logger('file' => qq{$GROUP/GrabYahooGroup.log}, 'quiet' => $QUIET);
 	$logger->group($GROUP);
 	$logger->section(' ');
 
@@ -427,7 +437,10 @@ use Term::ReadKey;
 sub new {
 	my $package = shift;
 	my $self = {};
-	my ($logfile) = @_;
+	my %args = @_;
+
+	my $logfile = $args{'file'};
+	my $quiet = $args{'quiet'};
 
 	my @accessors = ('group', 'section');
 	no strict 'refs';
@@ -453,6 +466,11 @@ sub new {
 	no strict 'refs';
 	foreach my $level (@loggers) {
 		my $tag = uc($level);
+		if ($quiet) {
+			*$level = sub {};
+			$quiet--;
+			next;
+		};
 		*$level = sub {
 			my $self = shift;
 			my $group = $self->group();
@@ -536,7 +554,7 @@ sub process_folder {
 			$self->process_folder($link);
 		} else {
 			if (!$force and -f qq{$GROUP/FILES/$folder$description}) {
-				$logger->info(qq{$folder$description - exists [skipped]});
+				$logger->debug(qq{$folder$description - exists [skipped]});
 				next;
 			}
 			$logger->info($folder . $description);
@@ -615,6 +633,19 @@ sub process_folder {
 
 	while ($content =~ m!<a href="(/group/$GROUP/attachments/folder/\d+/item/\d+/view)!sg) { $self->process_pic($1 . '?picmode=original&mode=list&order=ordinal&start=1&dir=asc'); };
 
+	# Yahoo sometimes looses track of the picture details
+	while ($content =~ m!<a href="(http://[^/]+?.yimg.com/kq/groups/\d+/(\d+)/name/.+?)">(.+?)</a>!sg) {
+		my ($img_url, $pic_id, $file_name) = ($1, $2, $3);
+		$file_name = decode_entities($file_name);
+		my ($photo_title, $file_ext) = $file_name =~ m{^(.+?)\.([^.]+)$};
+		$file_ext ||= 'jpg';
+		my ($profile, $user, $posted) = $content =~ m!<div class="ygrp-description">.+?&nbsp;\s+<a href="(.+?)">(.+?)</a>\s+-\s+(.+?)&nbsp;!s;
+		$user = decode_entities($user);
+		$posted = decode_entities($posted);
+		my ($folder_id) = $url =~ m!/group/$GROUP/attachments/folder/(\d+)/item/list!;
+		$self->process_broken_pic($url, $img_url, $file_name, $photo_title, $file_ext, $profile, $user, $posted, $folder_id, $pic_id);
+	};
+
 	while ($content =~ m!<tr class="ygrp-photos-list-row hbox">\s+(<td .+?</td>)\s+</tr>!sg) {
 		my $record = $1;
 		next if $record =~ / header /s;
@@ -633,7 +664,7 @@ sub process_folder {
 		$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_CREATOR'} = $folder_creator;
 		$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'CREATE_DATE'} = $create_date;
 		$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'MESSAGE'} = $message;
-		$logger->info($folder_name);
+		$logger->debug($folder_name);
 		next if !$force and $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'} and ($number_attachments == scalar (keys %{$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}}) );
 		mkdir qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id} or die qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id: $!\n} unless -d qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id};
 		my $start = 1;
@@ -649,6 +680,44 @@ sub process_folder {
 	$self->save_layout();
 
 	return $more_pages;
+}
+
+
+sub process_broken_pic {
+	my $self = shift;
+	my ($url, $img_url, $file_name, $photo_title, $file_ext, $profile, $user, $posted, $folder_id, $pic_id) = @_;
+
+	my $force = $self->{'FORCE_GET'};
+
+	my ($resolution, $photo_size) = ('', '');
+
+	$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id} = {
+					'USER' => $user,
+					'PROFILE' => $profile,
+					'PHOTO_TITLE' => $photo_title,
+					'FILE_NAME' => $file_name,
+					'POSTED' => $posted,
+					'RESOLUTION' => $resolution,
+					'SIZE' => $photo_size,
+					'FILE_EXT' => $file_ext,
+				};
+
+	if (!$force and $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id} and
+		-f qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.} . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'}) {
+			$logger->debug($self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . '/' .
+				$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_NAME'} . '.' . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'} . ' - exists (skipped)');
+			return;
+	}
+
+	my $image = $client->fetch($img_url, $url, 1);
+
+	$logger->info($self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . qq{/$photo_title - $resolution px / $photo_size});
+
+	open(IFD, '>', qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.$file_ext}) or $logger->error(qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.$file_ext: $!}) and return;
+	print IFD $image;
+	close IFD;
+
+	$self->save_layout();
 }
 
 
@@ -669,9 +738,8 @@ sub process_pic {
 	$photo_title = decode_entities($photo_title);
 	my ($file_name) = $content =~ m!<div id="ygrp-photos-filename">.+?:&nbsp;(.+?)<!s;
 	$file_name = decode_entities($file_name);
-	my ($file_ext) = $file_name =~ m!\.([^.]+)$!;
+	my ($file_ext) = $file_name =~ m{\.([^.]+)$};
 	$file_ext ||= 'jpg';
-	$file_ext = decode_entities($file_ext);
 	my ($posted) = $content =~ m!<div id="ygrp-photos-posted">.+?:&nbsp;(.+?)<!s;
 	$posted = decode_entities($posted);
 	my ($resolution) = $content =~ m!<div id="ygrp-photos-resolution">.+?:&nbsp;(.+?)<!s;
@@ -692,8 +760,8 @@ sub process_pic {
 
 	if (!$force and $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id} and
 		-f qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.} . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'}) {
-			$logger->info($self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . '/' .
-				$pic_id . '.' . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'} . ' - exists (skipped)');
+			$logger->debug($self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . '/' .
+				$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_NAME'} . '.' . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'} . ' - exists (skipped)');
 			return;
 	}
 
@@ -802,7 +870,7 @@ sub process_album {
 		$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_CREATOR'} = $album_creator;
 		$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'NUMBER_PHOTOS'} = $number_photos;
 		$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'LAST_MODIFIED'} = $last_modified;
-		$logger->info($album_name);
+		$logger->debug($album_name);
 		my $start = 1;
 		my $next_page = 1;
 		mkdir qq{$GROUP/PHOTOS/$album_id} or die qq{$GROUP/PHOTOS/$album_id: $!\n} unless -d qq{$GROUP/PHOTOS/$album_id};
@@ -831,7 +899,7 @@ sub process_pic {
 
 	if (!$force and $self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'PICTURES'}->{$pic_id} and
 		-f qq{$GROUP/PHOTOS/$album_id/$pic_id.} . $self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'PICTURES'}->{$pic_id}->{'FILE_EXT'}) {
-			$logger->info($self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_NAME'} . '/' .
+			$logger->debug($self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_NAME'} . '/' .
 				$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'PICTURES'}->{$pic_id}->{'PHOTO_TITLE'} . ' - exists (skipped)');
 			return;
 	}
@@ -847,7 +915,6 @@ sub process_pic {
 	$file_name = decode_entities($file_name);
 	my ($file_ext) = $file_name =~ m!\.([^.]+)$!;
 	$file_ext ||= 'jpg';
-	$file_ext = decode_entities($file_ext);
 	my ($posted) = $content =~ m!<div id="ygrp-photos-posted">.+?:&nbsp;(.+?)<!s;
 	$posted = decode_entities($posted);
 	my ($resolution) = $content =~ m!<div id="ygrp-photos-resolution">.+?:&nbsp;(.+?)<!s;
