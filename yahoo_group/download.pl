@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.7 2010-09-19 06:05:27 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.8 2010-10-01 05:12:14 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
@@ -212,7 +212,7 @@ sub new {
 	my $cookie_jar = HTTP::Cookies->new( 'file' => $cookie_file );
 	$cookie_jar->load();
 	$ua->cookie_jar($cookie_jar);
-	my $response = $ua->simple_request(GET qq{http://groups.yahoo.com/group/$GROUP});
+	my $response = $ua->simple_request(GET qq{http://www.yahoo.com/});
 	$self->response($response);
 
 	$self->ua($ua);
@@ -245,12 +245,13 @@ sub fetch {
 	my $content = $response->content();
 
 	if ($response->is_error()) {
-		if ($response->code() == 503) {
+		if ($response->code() > 499 and $response->code() < 600) {
 			$logger->warn(': Document Not Accessible - report to Yahoo');
 			$self->error_count();
-			$logger->info('Sleeping for 5 min');
-			sleep 5*60;
-			$content = $client->fetch($url);
+			$logger->info('Sleeping for 1 min');
+			$logger->info('Next check on ' . localtime(time() + 60));
+			sleep 60;
+			$content = $client->fetch($url,$referrer,$is_image);
 		} else {
 			die qq/[$url] / . $response->as_string() if $response->is_error();
 		}
@@ -259,10 +260,10 @@ sub fetch {
 	if ($content =~ /error 999/s) {
 		$logger->error('Yahoo quota block kicked in');
 		$self->error_count();
-		$logger->warn(qq/Sleeping for two hours/);
-		$logger->info('Next check on ' . localtime(time() + 2*60*60));
-		sleep(2*60*60);
-		$content = $self->fetch($url);
+		$logger->warn(qq/Sleeping for one hour/);
+		$logger->info('Next check on ' . localtime(time() + 60*60));
+		sleep(60*60);
+		$content = $self->fetch($url,$referrer,$is_image);
 	}
 
 	if(my ($message) = $content =~ m!<div class="ygrp-errors">(.+?)</div>!s) {
@@ -273,9 +274,10 @@ sub fetch {
 
 	if ($content =~ /Yahoo! Groups is an advertising supported service/ or $content =~ /Continue to message/s) {
 		$logger->debug($response->code());
-		$content = $self->fetch($url);
+		$content = $self->fetch($url,$referrer,$is_image);
 	}
 
+	# if ($content =~ m!<a href="http://login.yahoo.com/config/!s or $content =~ m!<form .+? name="login_form"!) {
 	if ($content =~ m!<form .+? name="login_form"!) {
 		$logger->info('Performing login');
 		$content = $self->process_loginform();
@@ -305,7 +307,7 @@ sub fetch {
 		}
 		$url = $self->get_absurl($redirect);
 		$logger->info(qq/Redirected to: $url/);
-		$content = $self->fetch($url);
+		$content = $self->fetch($url,$referrer,$is_image);
 	}
 
 	$self->reset_error_count();
@@ -539,7 +541,7 @@ sub process_folder {
 	# unescape URI
 	$folder =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/eg;
 
-	$logger->info($folder);
+	$logger->debug($folder);
 	mkdir qq{$GROUP/FILES/$folder} or die qq{$GROUP/FILES/$folder: $!\n} unless -d qq{$GROUP/FILES/$folder};
 
 	my $content = $client->fetch($url);
@@ -634,7 +636,7 @@ sub process_folder {
 	while ($content =~ m!<a href="(/group/$GROUP/attachments/folder/\d+/item/\d+/view)!sg) { $self->process_pic($1 . '?picmode=original&mode=list&order=ordinal&start=1&dir=asc'); };
 
 	# Yahoo sometimes looses track of the picture details
-	while ($content =~ m!<a href="(http://[^/]+?.yimg.com/kq/groups/\d+/(\d+)/name/.+?)">(.+?)</a>!sg) {
+	while ($content =~ m!<a href="(http://[^/]+?.yimg.com/kq/groups/\d+/(\d+)/name/[^"]+?)".*?>(.+?)</a>!sg) {
 		my ($img_url, $pic_id, $file_name) = ($1, $2, $3);
 		$file_name = decode_entities($file_name);
 		my ($photo_title, $file_ext) = $file_name =~ m{^(.+?)\.([^.]+)$};
@@ -691,6 +693,17 @@ sub process_broken_pic {
 
 	my ($resolution, $photo_size) = ('', '');
 
+	if (!$force and $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id} and
+		-f qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.} . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'}) {
+			$logger->debug($self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . '/' .
+				$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_NAME'} . '.' . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'} . ' - exists (skipped)');
+			return;
+	}
+
+	my $image = $client->fetch($img_url, $url, 1);
+
+	return unless $image;
+
 	$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id} = {
 					'USER' => $user,
 					'PROFILE' => $profile,
@@ -701,15 +714,6 @@ sub process_broken_pic {
 					'SIZE' => $photo_size,
 					'FILE_EXT' => $file_ext,
 				};
-
-	if (!$force and $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id} and
-		-f qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.} . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'}) {
-			$logger->debug($self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . '/' .
-				$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_NAME'} . '.' . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'} . ' - exists (skipped)');
-			return;
-	}
-
-	my $image = $client->fetch($img_url, $url, 1);
 
 	$logger->info($self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . qq{/$photo_title - $resolution px / $photo_size});
 
@@ -747,6 +751,17 @@ sub process_pic {
 	my ($photo_size) = $content =~ m!<div id="ygrp-photos-size">.+?:&nbsp;(.+?)<!s;
 	$photo_size = decode_entities($photo_size);
 
+	if (!$force and $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id} and
+		-f qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.} . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'}) {
+			$logger->debug($self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . '/' .
+				$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_NAME'} . '.' . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'} . ' - exists (skipped)');
+			return;
+	}
+
+	my $image = $client->fetch($img_url, $url, 1);
+
+	return unless $image;
+
 	$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id} = {
 					'USER' => $user,
 					'PROFILE' => $profile,
@@ -757,15 +772,6 @@ sub process_pic {
 					'SIZE' => $photo_size,
 					'FILE_EXT' => $file_ext,
 				};
-
-	if (!$force and $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id} and
-		-f qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.} . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'}) {
-			$logger->debug($self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . '/' .
-				$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_NAME'} . '.' . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'} . ' - exists (skipped)');
-			return;
-	}
-
-	my $image = $client->fetch($img_url, $url, 1);
 
 	$logger->info($self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . qq{/$photo_title - $resolution px / $photo_size});
 
@@ -922,6 +928,10 @@ sub process_pic {
 	my ($photo_size) = $content =~ m!<div id="ygrp-photos-size">.+?:&nbsp;(.+?)<!s;
 	$photo_size = decode_entities($photo_size);
 
+	my $image = $client->fetch($img_url, $url, 1);
+
+	return unless $image;
+
 	$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'PICTURES'}->{$pic_id} = {
 					'USER' => $user,
 					'PROFILE' => $profile,
@@ -932,8 +942,6 @@ sub process_pic {
 					'SIZE' => $photo_size,
 					'FILE_EXT' => $file_ext,
 				};
-
-	my $image = $client->fetch($img_url, $url, 1);
 
 	$logger->info($self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_NAME'} . qq{/$photo_title - $resolution px / $photo_size});
 
