@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.8 2010-10-01 05:12:14 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.9 2010-10-01 22:36:40 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
@@ -184,6 +184,8 @@ sub process {
 package GrabYahoo::Client;
 
 use HTTP::Request::Common qw(GET POST);
+use HTML::Entities;
+
 
 sub new {
 	my $package = shift;
@@ -277,7 +279,11 @@ sub fetch {
 		$content = $self->fetch($url,$referrer,$is_image);
 	}
 
-	# if ($content =~ m!<a href="http://login.yahoo.com/config/!s or $content =~ m!<form .+? name="login_form"!) {
+	if (my ($login_url) = $content =~ m!<h4><a href="(http://login.yahoo.com/config/.+?)"!s) {
+		$logger->info('Redirecting to login page');
+		$self->fetch($login_url);
+	}
+
 	if ($content =~ m!<form .+? name="login_form"!) {
 		$logger->info('Performing login');
 		$content = $self->process_loginform();
@@ -305,6 +311,7 @@ sub fetch {
 			$redirect = $url;
 			$self->error_count();
 		}
+		$redirect = decode_entities($redirect);
 		$url = $self->get_absurl($redirect);
 		$logger->info(qq/Redirected to: $url/);
 		$content = $self->fetch($url,$referrer,$is_image);
