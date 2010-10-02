@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.9 2010-10-01 22:36:40 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.10 2010-10-02 20:27:44 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
@@ -49,6 +49,9 @@ sub new {
 	my $QUIET = 1;
 	my $VERBOSE = 0;
 
+	my $PHOTO_INDEX = 1;
+	my $ATTACH_INDEX = 1;
+
 
 	my $result = GetOptions ('messages!' => \$MESSAGES,
 				 'files!' => \$FILES,
@@ -64,6 +67,8 @@ sub new {
 				 'forceget' => \$FORCE_GET,
 				 'quiet+' => \$QUIET,
 				 'verbose+' => \$VERBOSE,
+				 'photo-index!' => \$PHOTO_INDEX,
+				 'attach-index!' => \$ATTACH_INDEX,
 				);
 
 	die "Can't parse command line parameters" unless $result;
@@ -121,7 +126,7 @@ sub new {
 
 	if ($MESSAGES) {
 		$logger->info('MESSAGES enabled');
-		my $object = eval { new GrabYahoo::Messages ($BEGIN_MSGID, $END_MSGID); };
+		my $object = eval { new GrabYahoo::Messages (force => $FORCE_GET, begin => $BEGIN_MSGID, end => $END_MSGID); };
 		if ($@) {
 			$logger->error( $@ );
 		} else {
@@ -131,7 +136,7 @@ sub new {
 
 	if ($FILES) {
 		$logger->info('FILES enabled');
-		my $object = eval { new GrabYahoo::Files($FORCE_GET); };
+		my $object = eval { new GrabYahoo::Files(force => $FORCE_GET); };
 		if ($@) {
 			$logger->error( $@ );
 		} else {
@@ -141,7 +146,7 @@ sub new {
 
 	if ($ATTACHMENTS) {
 		$logger->info('ATTACHMENTS enabled');
-		my $object = eval { new GrabYahoo::Attachments($FORCE_GET); };
+		my $object = eval { new GrabYahoo::Attachments(force => $FORCE_GET, index => $ATTACH_INDEX); };
 		if ($@) {
 			$logger->error( $@ );
 		} else {
@@ -151,7 +156,7 @@ sub new {
 
 	if ($PHOTOS) {
 		$logger->info('PHOTOS enabled');
-		my $object = eval { new GrabYahoo::Photos($FORCE_GET); };
+		my $object = eval { new GrabYahoo::Photos(force => $FORCE_GET, index => $PHOTO_INDEX); };
 		if ($@) {
 			$logger->error( $@ );
 		} else {
@@ -161,7 +166,7 @@ sub new {
 
 	if ($MEMBERS) {
 		$logger->info('MEMBERS enabled');
-		my $object = eval { new GrabYahoo::Members($FORCE_GET); };
+		my $object = eval { new GrabYahoo::Members(force => $FORCE_GET); };
 		if ($@) {
 			$logger->error( $@ );
 		} else {
@@ -445,7 +450,7 @@ use Term::ReadKey;
 
 sub new {
 	my $package = shift;
-	my $self = {};
+	my $self = bless {};
 	my %args = @_;
 
 	my $logfile = $args{'file'};
@@ -484,12 +489,24 @@ sub new {
 			my $self = shift;
 			my $group = $self->group();
 			my $section = $self->section();
-			$self->dispatch(qq/[$tag]/, qq/[$GROUP]/, qq/[$section]/, @_, "\n");
+			$self->dispatch(qq/[$tag]/, qq/[$group]/, qq/[$section]/, @_, "\n");
 		};
 	}
 	use strict;
 
-	return bless $self;
+	$self->group(' ');
+	$self->section(' ');
+	$self->info('Started: ' . localtime() );
+
+	return $self;
+}
+
+
+sub DESTROY {
+	my $self = shift;
+	$self->group(' ');
+	$self->section(' ');
+	$self->info('Finished: ' . localtime() );
 }
 
 
@@ -523,8 +540,9 @@ use HTML::Entities;
 
 sub new {
 	my $package = shift;
-	my ($force) = @_;
-	return bless {'FORCE_GET' => $force};
+	my %args = @_;
+	my $self = { 'FORCE_GET' => $args{'force'} };
+	return bless $self;
 }
 
 
@@ -533,7 +551,7 @@ sub process {
 	$logger->section('Files');
 	$logger->info('Processing FILES');
 	mkdir qq{$GROUP/FILES} or die qq{$GROUP/FILES: $!\n} unless -d qq{$GROUP/FILES};
-	$self->process_folder(qq{/group/$GROUP/files});
+	$self->process_folder(qq{/group/$GROUP/files/});
 }
 
 
@@ -544,7 +562,7 @@ sub process_folder {
 	my $force = $self->{'FORCE_GET'};
 
 	my ($folder) = $url =~ m{/files/(.+?)$};
-	$folder = '/' unless $folder;
+	$folder ||= '';
 	# unescape URI
 	$folder =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/eg;
 
@@ -584,8 +602,11 @@ use HTML::Entities;
 
 sub new {
 	my $package = shift;
-	my ($force) = @_;
-	my $self = {'FORCE_GET' => $force};
+	my %args = @_;
+	my $self = {
+		'FORCE_GET' => $args{'force'},
+		'INDEX' => $args{'index'},
+	};
 	if (-f qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump}) {
 		my $buf = $/;
 		$/ = undef;
@@ -617,8 +638,10 @@ sub save_layout {
 
 sub process {
 	my $self = shift;
+
 	$logger->section('Attachments');
 	$logger->info('Processing ATTACHMENTS');
+
 	mkdir qq{$GROUP/MESSAGES} or die qq{$GROUP/MESSAGES: $!\n} unless -d qq{$GROUP/MESSAGES};
 	mkdir qq{$GROUP/MESSAGES/ATTACHMENTS} or die qq{$GROUP/MESSAGES/ATTACHMENTS: $!\n} unless -d qq{$GROUP/MESSAGES/ATTACHMENTS};
 	my $start = 1;
@@ -629,6 +652,126 @@ sub process {
 	}
 
 	$self->save_layout();
+
+	if ($self->{'INDEX'}) {
+		$logger->info('Generating index page');
+		$self->generate_index();
+	}
+}
+
+
+sub generate_index {
+	my $self = shift;
+
+	my $layout = $self->{'LAYOUT'};
+
+	open (HD, '>', $GROUP . '/MESSAGES/ATTACHMENTS/index.html') or die $GROUP . '/MESSAGES/ATTACHMENTS/index.html: ' . $! . "\n";
+	print HD q{
+<HTML>
+<BODY BACKGROUND='WHITE'>
+	};
+
+	if (scalar keys %{$layout->{'FOLDER'}}) {
+		print HD q{
+<TABLE ALIGN='CENTER' BORDER='2' WIDTH='100%' CELLPADDING='0' CELLSPACING='0'>
+<THEAD>
+	<TR BGCOLOR='BLACK'>
+		<TD ALIGN='CENTER' WIDTH='50%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Mail Subject</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='10%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Attachments</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='20%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Creator</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='10%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Date</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='10%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Original Mail</STRONG></FONT></TD>
+	</TR>
+</THEAD>
+<TBODY>
+		};
+		foreach my $folder_id (keys %{$layout->{'FOLDER'}}) {
+			my $album = $layout->{'FOLDER'}->{$folder_id};
+			my $subject = encode_entities($album->{'FOLDER_NAME'});
+			my $number_attach = encode_entities($album->{'NUMBER_ATTACHMENTS'});
+			my $creator = encode_entities($album->{'FOLDER_CREATOR'});
+			my $profile = $album->{'CREATOR_PROFILE'};
+			my $create_date = encode_entities($album->{'CREATE_DATE'});
+			my $message = encode_entities($album->{'MESSAGE'});
+			$message = 'http://groups.yahoo.com' . $message if $message !~ /^http/;
+
+			my $creator_profile = ($profile) ? qq#<TD><A HREF="$profile">$creator</A></TD>#: qq#<TD>$creator</TD>#;
+
+			print HD qq{
+	<TR>
+		<TD><A HREF="#$folder_id">$subject</A></TD>
+		<TD>$number_attach</TD>
+		$creator_profile
+		<TD>$create_date</TD>
+		<TD><A HREF="$message">View</A></TD>
+	</TR>
+			};
+		}
+
+		print HD q{
+</TBODY>
+</TABLE>
+		};
+
+		foreach my $folder_id (keys %{$layout->{'FOLDER'}}) {
+			my $folder = $layout->{'FOLDER'}->{$folder_id};
+			next unless $folder->{'ITEM'};
+			my $subject = encode_entities($folder->{'FOLDER_NAME'});
+			print HD qq{
+<P ALIGN="CENTER">
+<A NAME="$folder_id">$subject</A>
+</P>
+
+<TABLE ALIGN='CENTER' BORDER='2' WIDTH='100%' CELLPADDING='0' CELLSPACING='0'>
+<THEAD>
+	<TR BGCOLOR='BLACK'>
+		<TD ALIGN='CENTER' WIDTH='30%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Photo Name</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='10%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Creator</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='30%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>File Name</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='10%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Size</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='10%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Resolution</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='10%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Posted</STRONG></FONT></TD>
+	</TR>
+</THEAD>
+<TBODY>
+			};
+			foreach my $picid (keys %{$folder->{'ITEM'}}) {
+				my $picture = $folder->{'ITEM'}->{$picid};
+				my $title = encode_entities($picture->{'PHOTO_TITLE'});
+				my $creator = encode_entities($picture->{'USER'});
+				my $profile = $picture->{'PROFILE'};
+				my $name = encode_entities($picture->{'FILE_NAME'});
+				my $size = encode_entities($picture->{'SIZE'});
+				my $posted = encode_entities($picture->{'POSTED'});
+				my $resolution = encode_entities($picture->{'RESOLUTION'});
+				my $extension = encode_entities($picture->{'FILE_EXT'});
+
+				print HD qq{
+	<TR>
+		<TD><A HREF="$folder_id/$picid.$extension">$title</A></TD>
+		<TD><A HREF="$profile">$creator</A></TD>
+		<TD>$name</TD>
+		<TD>$size</TD>
+		<TD>$resolution</TD>
+		<TD>$posted</TD>
+	</TR>
+				};
+			}
+
+			print HD q{
+</TBODY>
+</TABLE>
+			};
+
+		}
+	}
+
+	print HD q{
+</BODY>
+</HTML>
+	};
+
+	close HD;
 }
 
 
@@ -795,8 +938,9 @@ package GrabYahoo::Members;
 
 sub new {
 	my $package = shift;
-	my ($force) = @_;
-	return bless {'FORCE_GET' => $force};
+	my %args = @_;
+	my $self = { 'FORCE_GET' => $args{'force'} };
+	return bless $self;
 }
 
 
@@ -813,8 +957,11 @@ use HTML::Entities;
 
 sub new {
 	my $package = shift;
-	my ($force) = @_;
-	my $self = {'FORCE_GET' => $force};
+	my %args = @_;
+	my $self = {
+		'FORCE_GET' => $args{'force'},
+		'INDEX' => $args{'index'},
+	};
 	if (-f qq{$GROUP/PHOTOS/layout.dump}) {
 		my $buf = $/;
 		$/ = undef;
@@ -846,8 +993,10 @@ sub save_layout {
 
 sub process {
 	my $self = shift;
+
 	$logger->section('Photos');
 	$logger->info('Processing PHOTOS');
+
 	mkdir qq{$GROUP/PHOTOS} or die "$GROUP/PHOTOS: $!\n" unless -d qq{$GROUP/PHOTOS};
 	my $start = 1;
 	my $next_page = 1;
@@ -857,6 +1006,123 @@ sub process {
 	}
 
 	$self->save_layout();
+
+	if ($self->{'INDEX'}) {
+		$logger->info('Generating index page');
+		$self->generate_index();
+	}
+}
+
+
+sub generate_index {
+	my $self = shift;
+
+	my $layout = $self->{'LAYOUT'};
+
+	open (HD, '>', $GROUP . '/PHOTOS/index.html') or die $GROUP . '/PHOTOS/index.html: ' . $! . "\n";
+	print HD q{
+<HTML>
+<BODY BACKGROUND='WHITE'>
+};
+
+	if (scalar keys %{$layout->{'ALBUM'}}) {
+		print HD q{
+<TABLE ALIGN='CENTER' BORDER='2' WIDTH='100%' CELLPADDING='0' CELLSPACING='0'>
+<THEAD>
+	<TR BGCOLOR='BLACK'>
+		<TD ALIGN='CENTER' WIDTH='50%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Album Name</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='20%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Creator</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='10%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Access</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='10%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Photos</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='10%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Last Modified</STRONG></FONT></TD>
+	</TR>
+</THEAD>
+<TBODY>
+};
+		foreach my $aid (keys %{$layout->{'ALBUM'}}) {
+			my $album = $layout->{'ALBUM'}->{$aid};
+			my $name = encode_entities($album->{'ALBUM_NAME'});
+			my $access = encode_entities($album->{'ALBUM_ACCESS'});
+			my $creator = encode_entities($album->{'ALBUM_CREATOR'});
+			my $profile = $album->{'CREATOR_PROFILE'};
+			my $number = encode_entities($album->{'NUMBER_PHOTOS'});
+			my $modified = encode_entities($album->{'LAST_MODIFIED'});
+
+			print HD qq{
+	<TR>
+		<TD><A HREF="#$aid">$name</A></TD>
+		<TD><A HREF="$profile">$creator</A></TD>
+		<TD>$access</TD>
+		<TD>$number</TD>
+		<TD>$modified</TD>
+	</TR>
+			};
+		}
+
+		print HD q{
+</TBODY>
+</TABLE>
+		};
+
+		foreach my $aid (keys %{$layout->{'ALBUM'}}) {
+			my $album = $layout->{'ALBUM'}->{$aid};
+			next unless $album->{'PICTURES'};
+			my $album_name = encode_entities($album->{'ALBUM_NAME'});
+			print HD qq{
+<P ALIGN="CENTER">
+<A NAME="$aid">$album_name</A>
+</P>
+
+<TABLE ALIGN='CENTER' BORDER='2' WIDTH='100%' CELLPADDING='0' CELLSPACING='0'>
+<THEAD>
+	<TR BGCOLOR='BLACK'>
+		<TD ALIGN='CENTER' WIDTH='30%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Photo Name</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='10%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Creator</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='30%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>File Name</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='10%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Size</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='10%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Resolution</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='10%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>Posted</STRONG></FONT></TD>
+	</TR>
+</THEAD>
+<TBODY>
+			};
+			foreach my $picid (keys %{$album->{'PICTURES'}}) {
+				my $picture = $album->{'PICTURES'}->{$picid};
+				my $title = encode_entities($picture->{'PHOTO_TITLE'});
+				my $creator = encode_entities($picture->{'USER'});
+				my $profile = $picture->{'PROFILE'};
+				my $name = encode_entities($picture->{'FILE_NAME'});
+				my $size = encode_entities($picture->{'SIZE'});
+				my $posted = encode_entities($picture->{'POSTED'});
+				my $resolution = encode_entities($picture->{'RESOLUTION'});
+				my $extension = encode_entities($picture->{'FILE_EXT'});
+
+				print HD qq{
+	<TR>
+		<TD><A HREF="$aid/$picid.$extension">$title</A></TD>
+		<TD><A HREF="$profile">$creator</A></TD>
+		<TD>$name</TD>
+		<TD>$size</TD>
+		<TD>$resolution</TD>
+		<TD>$posted</TD>
+	</TR>
+				};
+			}
+
+			print HD q{
+</TBODY>
+</TABLE>
+			};
+
+		}
+	}
+
+	print HD q{
+</BODY>
+</HTML>
+	};
+
+	close HD;
 }
 
 
