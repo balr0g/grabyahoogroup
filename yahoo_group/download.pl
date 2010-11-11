@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.10 2010-10-02 20:27:44 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.11 2010-11-11 04:39:53 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
@@ -99,7 +99,7 @@ sub new {
 		chomp $USERNAME;
 	}
 
-	foreach ($MESSAGES, $FILES, $ATTACHMENTS, $PHOTOS, $MEMBERS) { $_ = 1 if $ALL; };
+	foreach ($MESSAGES, $FILES, $ATTACHMENTS, $PHOTOS) { $_ = 1 if $ALL; };
 
 	my $self = {};
 
@@ -798,8 +798,10 @@ sub process_folder {
 		$self->process_broken_pic($url, $img_url, $file_name, $photo_title, $file_ext, $profile, $user, $posted, $folder_id, $pic_id);
 	};
 
+	my $more_pages = 0;
 	while ($content =~ m!<tr class="ygrp-photos-list-row hbox">\s+(<td .+?</td>)\s+</tr>!sg) {
 		my $record = $1;
+		$more_pages++;
 		next if $record =~ / header /s;
 		my ($folder_url, $folder_id, $folder_name) = $record =~ m!<a href="(/group/$GROUP/attachments/folder/(\d+)/item/list)">(.+?)</a>!sg;
 		$folder_name = decode_entities($folder_name);
@@ -826,8 +828,6 @@ sub process_folder {
 			$start += 20;
 		}
 	};
-	my $more_pages = 0;
-	$more_pages = 1 if $content =~ m!<a href="/group/$GROUP/attachments/folder/\d+/list.+?">Next<!sg;
 
 	$self->save_layout();
 
@@ -939,14 +939,133 @@ package GrabYahoo::Members;
 sub new {
 	my $package = shift;
 	my %args = @_;
-	my $self = { 'FORCE_GET' => $args{'force'} };
+	my $self = {
+		'FORCE_GET' => $args{'force'},
+		'INDEX' => $args{'index'},
+	};
 	return bless $self;
 }
 
 
+sub save_layout {
+	my $self = shift;
+
+	my $LAYOUT = $self->{'LAYOUT'};
+
+	return unless $LAYOUT;
+
+	my $layout = Data::Dumper->Dump([$LAYOUT]);
+	open (LAY, '>', qq{$GROUP/MEMBERS/layout.dump}) or die qq{$GROUP/MEMBERS/layout.dump: $!\n};
+	print LAY $layout;
+	close LAY;
+}
+
+
 sub process {
+	my $self = shift;
+
 	$logger->section('Members');
 	$logger->info('Processing MEMBERS');
+
+	mkdir qq{$GROUP/MEMBERS} or die "$GROUP/MEMBERS: $!\n" unless -d qq{$GROUP/MEMBERS};
+
+	my $start = 1;
+	my $next_page = 1;
+	while ($next_page) {
+		$next_page = $self->process_members('MEMBERS', qq{/group/$GROUP/members?group=sub&xm=1&o=5i&m=e&start=$start});
+		$start += 10;
+	}
+	$self->save_layout();
+
+	$start = 1;
+	$next_page = 1;
+	while ($next_page) {
+		$next_page = $self->process_members('MODERATORS', qq{/group/$GROUP/members?group=mod&xm=1&o=5i&m=e&start=$start});
+		$start += 10;
+	}
+	$self->save_layout();
+
+	$start = 1;
+	$next_page = 1;
+	while ($next_page) {
+		$next_page = $self->process_members('BOUNCING', qq{/group/$GROUP/members?group=bounce&xm=1&o=5i&m=e&start=$start});
+		$start += 10;
+	}
+	$self->save_layout();
+
+	$start = 1;
+	$next_page = 1;
+	while ($next_page) {
+		$next_page = $self->process_members('PENDING', qq{/group/$GROUP/members?group=pending&xm=1&o=5i&m=e&start=$start});
+		$start += 10;
+	}
+	$self->save_layout();
+
+	$start = 1;
+	$next_page = 1;
+	while ($next_page) {
+		$next_page = $self->process_members('BANNED', qq{/group/$GROUP/members?group=ban&xm=1&o=5i&m=e&start=$start});
+		$start += 10;
+	}
+	$self->save_layout();
+
+	if (0 and $self->{'INDEX'}) {
+		$logger->info('Generating index page');
+		$self->generate_index();
+	}
+}
+
+
+sub process_members {
+	my $self = shift;
+	my ($type, $url) = @_;
+
+	my $content = $client->fetch($url);
+
+	my ($body) = $content =~ m#<!-- start content include -->\s+(<.+?>)\s+<!-- end content include -->#s;
+
+	my $more_pages = 0;
+	while ($body =~ m!(<td class="info">\s+.+?</tr>)!sg) {
+		my $row = $1;
+		$more_pages++;
+		my ($profile1, $name) = $row =~ m!<span class="name">\s+.*?<a href="(.+?)".*?>(.+?)</a> </span>!s;
+		my ($user_details) = $row =~ m!<div class="demo">(.+?<br>.+?)</div>!s;
+		my ($rname, $age, $gender, $location);
+		if ($user_details =~ m!</span>!s) {
+			($rname, $age, $gender, $location) = $user_details =~ m!<span.+?>(.+?)</span>\s+<span.+?>(.+?)</span>\s+<span.+?>(.+?)</span>\s+<br>\s+<span.+?>(.+?)</span>!s;
+		} else {
+			($rname, $age, $gender, $location) = $user_details =~ m!<div class="form-hr"></div>\s+(\w.+?) &middot; (.+?) &middot; (.+?) <br> (.+) !s;
+		}
+		my ($profile2, $yid) =  $row =~ m!<td class="yid ygrp-nowrap">\s+<a href="(.+?)".*?>(.+?)</a> </td>!s;
+		my ($email) = $row =~ m!<td class="email ygrp-nowrap">\s+<a href=.+?>(.+?)</a>!s;
+		unless ($yid) {
+			$profile2 = 'PROFILE DELETED';
+			$profile1 = 'PROFILE DELETED';
+			$name = $email;
+			$yid = $email;
+		}
+		my ($email_delivery) = $row =~ m!<select name="submode.0".+?<option value="\d" selected>\s+(\w.+?)</option>!s;
+		my ($email_prefs) = $row =~ m!<select name="emailPref.0" >.+?<option value="\d" selected>\s+(\w.+?)</option>!s;
+		$email_delivery ||= '';
+		$email_prefs ||= '';
+
+		$logger->info(join '|', ($email, $name, $rname, $age, $gender, $location));
+
+		$self->{'LAYOUT'}->{$type}->{$yid}->{'PROFILE1'} = $profile1;
+		$self->{'LAYOUT'}->{$type}->{$yid}->{'PROFILE2'} = $profile2;
+		$self->{'LAYOUT'}->{$type}->{$yid}->{'NAME'} = $name;
+		$self->{'LAYOUT'}->{$type}->{$yid}->{'REAL_NAME'} = $rname;
+		$self->{'LAYOUT'}->{$type}->{$yid}->{'AGE'} = $age;
+		$self->{'LAYOUT'}->{$type}->{$yid}->{'GENDER'} = $gender;
+		$self->{'LAYOUT'}->{$type}->{$yid}->{'LOCATION'} = $location;
+		$self->{'LAYOUT'}->{$type}->{$yid}->{'EMAIL'} = $email;
+		$self->{'LAYOUT'}->{$type}->{$yid}->{'EMAIL_DELIVERY'} = $email_delivery;
+		$self->{'LAYOUT'}->{$type}->{$yid}->{'EMAIL_PREFS'} = $email_prefs;
+	}
+
+	$self->save_layout();
+
+	return $more_pages;
 }
 
 
@@ -985,7 +1104,7 @@ sub save_layout {
 	return unless $LAYOUT;
 
 	my $layout = Data::Dumper->Dump([$LAYOUT]);
-	open (LAY, '>', qq{$GROUP/PHOTOS/layout.dump}) or die qq{$GROUP/PHOTOS/layout.xml: $!\n};
+	open (LAY, '>', qq{$GROUP/PHOTOS/layout.dump}) or die qq{$GROUP/PHOTOS/layout.dump: $!\n};
 	print LAY $layout;
 	close LAY;
 }
@@ -1134,8 +1253,10 @@ sub process_album {
 
 	while ($content =~ m!<a href="(/group/$GROUP/photos/album/\d+/pic/\d+/view)!sg) { $self->process_pic($1 . '?picmode=original&mode=list&order=ordinal&start=1&dir=asc'); };
 
+	my $more_pages = 0;
 	while ($content =~ m!(<div class="ygrp-photos-title ">.+?<br class="clear-both"/>)!sg) {
 		my $record = $1;
+		$more_pages++;
 		my ($album_url, $album_id, $album_name) = $record =~ m!<div class="ygrp-photos-title ">.+?<a href="(/group/$GROUP/photos/album/(\d+)/pic/list).*?>(.+?)</a>!sg;
 		$album_name = decode_entities($album_name);
 		my ($album_access) = $record =~ m!<div class="ygrp-photos-access">\s+(.+?)</div>!s;
@@ -1158,9 +1279,6 @@ sub process_album {
 			$start += 20;
 		}
 	};
-
-	my $more_pages = 0;
-	$more_pages = 1 if $content =~ m!<a href="(/group/$GROUP/photos/album/(\d+)/pic/list).*?>Next<!sg;
 
 	$self->save_layout();
 
