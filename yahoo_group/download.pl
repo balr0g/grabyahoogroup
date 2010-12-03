@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.11 2010-11-11 04:39:53 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.12 2010-12-03 04:48:29 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
@@ -226,6 +226,8 @@ sub new {
 	$self->cookie_jar($cookie_jar);
 
 	my $content = $self->fetch(qq{https://login.yahoo.com/config/verify?.done=http%3a%2F%2Fgroups.yahoo.com%2Fgroup%2F$GROUP%2F});
+
+	$content = $self->fetch(qq{https://login.yahoo.com/config/login?.done=http%3a%2F%2Fgroups.yahoo.com%2Fgroup%2F$GROUP%2F}) if $content =~ m!login.yahoo.com/config/login?logout=1!;
 
 	return $self;
 }
@@ -611,6 +613,7 @@ sub new {
 		my $buf = $/;
 		$/ = undef;
 		open(LAY, '<', qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump}) or die qq{$GROUP/PHOTOS/layout.dump: $!\n};
+		binmode LAY,':encoding(utf-8)';
 		my $dump = <LAY>;
 		close LAY;
 		$/ = $buf;
@@ -631,6 +634,7 @@ sub save_layout {
 
 	my $layout = Data::Dumper->Dump([$LAYOUT]);
 	open (LAY, '>', qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump}) or die qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump: $!\n};
+	binmode LAY,':encoding(utf-8)';
 	print LAY $layout;
 	close LAY;
 }
@@ -666,6 +670,7 @@ sub generate_index {
 	my $layout = $self->{'LAYOUT'};
 
 	open (HD, '>', $GROUP . '/MESSAGES/ATTACHMENTS/index.html') or die $GROUP . '/MESSAGES/ATTACHMENTS/index.html: ' . $! . "\n";
+	binmode HD,':encoding(utf-8)';
 	print HD q{
 <HTML>
 <BODY BACKGROUND='WHITE'>
@@ -783,7 +788,9 @@ sub process_folder {
 
 	my $content = $client->fetch($url);
 
-	while ($content =~ m!<a href="(/group/$GROUP/attachments/folder/\d+/item/\d+/view)!sg) { $self->process_pic($1 . '?picmode=original&mode=list&order=ordinal&start=1&dir=asc'); };
+	my $more_pages = 0;
+
+	while ($content =~ m!<a href="(/group/$GROUP/attachments/folder/\d+/item/\d+/view)!sg) { $more_pages++; $self->process_pic($1 . '?picmode=original&mode=list&order=ordinal&start=1&dir=asc'); };
 
 	# Yahoo sometimes looses track of the picture details
 	while ($content =~ m!<a href="(http://[^/]+?.yimg.com/kq/groups/\d+/(\d+)/name/[^"]+?)".*?>(.+?)</a>!sg) {
@@ -798,11 +805,10 @@ sub process_folder {
 		$self->process_broken_pic($url, $img_url, $file_name, $photo_title, $file_ext, $profile, $user, $posted, $folder_id, $pic_id);
 	};
 
-	my $more_pages = 0;
 	while ($content =~ m!<tr class="ygrp-photos-list-row hbox">\s+(<td .+?</td>)\s+</tr>!sg) {
 		my $record = $1;
-		$more_pages++;
 		next if $record =~ / header /s;
+		$more_pages++;
 		my ($folder_url, $folder_id, $folder_name) = $record =~ m!<a href="(/group/$GROUP/attachments/folder/(\d+)/item/list)">(.+?)</a>!sg;
 		$folder_name = decode_entities($folder_name);
 		my ($number_attachments) = $record =~ m!<td class="ygrp-photos-attachments ">\s+(\d+)</td>!s;
@@ -845,8 +851,7 @@ sub process_broken_pic {
 
 	if (!$force and $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id} and
 		-f qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.} . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'}) {
-			$logger->debug($self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . '/' .
-				$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_NAME'} . '.' . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'} . ' - exists (skipped)');
+			$logger->debug($self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . '/' . $photo_title . ' - exists (skipped)');
 			return;
 	}
 
@@ -903,8 +908,7 @@ sub process_pic {
 
 	if (!$force and $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id} and
 		-f qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.} . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'}) {
-			$logger->debug($self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . '/' .
-				$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_NAME'} . '.' . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'} . ' - exists (skipped)');
+			$logger->debug($self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . '/' . $photo_title . ' - exists (skipped)');
 			return;
 	}
 
@@ -956,6 +960,7 @@ sub save_layout {
 
 	my $layout = Data::Dumper->Dump([$LAYOUT]);
 	open (LAY, '>', qq{$GROUP/MEMBERS/layout.dump}) or die qq{$GROUP/MEMBERS/layout.dump: $!\n};
+	binmode LAY,':encoding(utf-8)';
 	print LAY $layout;
 	close LAY;
 }
@@ -1085,6 +1090,7 @@ sub new {
 		my $buf = $/;
 		$/ = undef;
 		open(LAY, '<', qq{$GROUP/PHOTOS/layout.dump}) or die qq{$GROUP/PHOTOS/layout.dump: $!\n};
+		binmode LAY,':encoding(utf-8)';
 		my $dump = <LAY>;
 		close LAY;
 		$/ = $buf;
@@ -1105,6 +1111,7 @@ sub save_layout {
 
 	my $layout = Data::Dumper->Dump([$LAYOUT]);
 	open (LAY, '>', qq{$GROUP/PHOTOS/layout.dump}) or die qq{$GROUP/PHOTOS/layout.dump: $!\n};
+	binmode LAY,':encoding(utf-8)';
 	print LAY $layout;
 	close LAY;
 }
@@ -1139,6 +1146,7 @@ sub generate_index {
 	my $layout = $self->{'LAYOUT'};
 
 	open (HD, '>', $GROUP . '/PHOTOS/index.html') or die $GROUP . '/PHOTOS/index.html: ' . $! . "\n";
+	binmode HD,':encoding(utf-8)';
 	print HD q{
 <HTML>
 <BODY BACKGROUND='WHITE'>
@@ -1251,9 +1259,10 @@ sub process_album {
 
 	my $content = $client->fetch($url);
 
-	while ($content =~ m!<a href="(/group/$GROUP/photos/album/\d+/pic/\d+/view)!sg) { $self->process_pic($1 . '?picmode=original&mode=list&order=ordinal&start=1&dir=asc'); };
-
 	my $more_pages = 0;
+
+	while ($content =~ m!<a href="(/group/$GROUP/photos/album/\d+/pic/\d+/view)!sg) { $more_pages++; $self->process_pic($1 . '?picmode=original&mode=list&order=ordinal&start=1&dir=asc'); };
+
 	while ($content =~ m!(<div class="ygrp-photos-title ">.+?<br class="clear-both"/>)!sg) {
 		my $record = $1;
 		$more_pages++;
@@ -1319,10 +1328,6 @@ sub process_pic {
 	my ($photo_size) = $content =~ m!<div id="ygrp-photos-size">.+?:&nbsp;(.+?)<!s;
 	$photo_size = decode_entities($photo_size);
 
-	my $image = $client->fetch($img_url, $url, 1);
-
-	return unless $image;
-
 	$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'PICTURES'}->{$pic_id} = {
 					'USER' => $user,
 					'PROFILE' => $profile,
@@ -1333,6 +1338,15 @@ sub process_pic {
 					'SIZE' => $photo_size,
 					'FILE_EXT' => $file_ext,
 				};
+
+	if (!$force and -f "$GROUP/PHOTOS/$album_id/$pic_id.$file_ext") {
+		$logger->debug($self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_NAME'} . qq{/$photo_title - exists ... skipped});
+		return;
+	}
+
+	my $image = $client->fetch($img_url, $url, 1);
+
+	return unless $image;
 
 	$logger->info($self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_NAME'} . qq{/$photo_title - $resolution px / $photo_size});
 
