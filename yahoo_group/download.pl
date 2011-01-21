@@ -1,17 +1,22 @@
 #!/usr/bin/perl -w
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.12 2010-12-03 04:48:29 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.13 2011-01-21 05:38:53 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
+use 5.8.1;
+
 use strict;
-use utf8;
 
 use Crypt::SSLeay;
 use HTTP::Cookies ();
 use LWP::UserAgent ();
 use LWP::Simple ();
 use HTML::Entities;
+
+use Data::Dumper;
+# $Data::Dumper::Useqq = 1;
+# $Data::Dumper::Purity = 1;
 
 my $GROUP;
 
@@ -227,7 +232,7 @@ sub new {
 
 	my $content = $self->fetch(qq{https://login.yahoo.com/config/verify?.done=http%3a%2F%2Fgroups.yahoo.com%2Fgroup%2F$GROUP%2F});
 
-	$content = $self->fetch(qq{https://login.yahoo.com/config/login?.done=http%3a%2F%2Fgroups.yahoo.com%2Fgroup%2F$GROUP%2F}) if $content =~ m!login.yahoo.com/config/login?logout=1!;
+	$content = $self->fetch(qq{https://login.yahoo.com/config/login?.done=http%3a%2F%2Fgroups.yahoo.com%2Fgroup%2F$GROUP%2F}) if $content !~ m!login.yahoo.com/config/login\?logout=1!s;
 
 	return $self;
 }
@@ -261,6 +266,8 @@ sub fetch {
 			$logger->info('Next check on ' . localtime(time() + 60));
 			sleep 60;
 			$content = $client->fetch($url,$referrer,$is_image);
+		} elsif ($response->code() == 404 and $is_image) {
+			return '';
 		} else {
 			die qq/[$url] / . $response->as_string() if $response->is_error();
 		}
@@ -524,14 +531,27 @@ package GrabYahoo::Messages;
 
 
 sub new {
-	my $self = {};
+	my $package = shift;
+	my %args = @_;
+	my $self = { 'FORCE_GET' => $args{'force'} };
 	return bless $self;
 }
 
 
 sub process {
+	my $self = shift;
+
 	$logger->section('Messages');
 	$logger->info('Processing MESSAGES');
+
+	my $force = $self->{'FORCE_GET'};
+
+	mkdir qq{$GROUP/MESSAGES} or die qq{$GROUP/MESSAGES: $!\n} unless -d qq{$GROUP/MESSAGES};
+	my $content = $client->fetch(qq{/group/$GROUP/messages/1?xm=1&m=s&l=1&o=0});
+	my ($beg_msg, $end_msg) = $content =~ m!<table cellpadding="0" cellspacing="0" class="headview headnav"><tr>\s<td class="viewright">\s\w+ <em>(\d+) - \d+</em> \w+ (\d+) !s;
+	foreach my $msg_idx (reverse($beg_msg..$end_msg)) {
+		next unless ($force or -s "$GROUP/MESSAGES/$msg_idx");
+	}
 }
 
 
@@ -590,6 +610,7 @@ sub process_folder {
 			my $file = $client->fetch($link, $url, 1);
 			next unless $file;
 			open(ID, '>', qq{$GROUP/FILES/$folder$description}) or die qq{$GROUP/FILES/$folder$description: $!\n};
+			binmode(ID);
 			print ID $file;
 			close ID;
 		}
@@ -599,7 +620,6 @@ sub process_folder {
 
 package GrabYahoo::Attachments;
 
-use Data::Dumper;
 use HTML::Entities;
 
 sub new {
@@ -613,7 +633,6 @@ sub new {
 		my $buf = $/;
 		$/ = undef;
 		open(LAY, '<', qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump}) or die qq{$GROUP/PHOTOS/layout.dump: $!\n};
-		binmode LAY,':encoding(utf-8)';
 		my $dump = <LAY>;
 		close LAY;
 		$/ = $buf;
@@ -634,7 +653,6 @@ sub save_layout {
 
 	my $layout = Data::Dumper->Dump([$LAYOUT]);
 	open (LAY, '>', qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump}) or die qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump: $!\n};
-	binmode LAY,':encoding(utf-8)';
 	print LAY $layout;
 	close LAY;
 }
@@ -670,7 +688,6 @@ sub generate_index {
 	my $layout = $self->{'LAYOUT'};
 
 	open (HD, '>', $GROUP . '/MESSAGES/ATTACHMENTS/index.html') or die $GROUP . '/MESSAGES/ATTACHMENTS/index.html: ' . $! . "\n";
-	binmode HD,':encoding(utf-8)';
 	print HD q{
 <HTML>
 <BODY BACKGROUND='WHITE'>
@@ -873,6 +890,7 @@ sub process_broken_pic {
 	$logger->info($self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . qq{/$photo_title - $resolution px / $photo_size});
 
 	open(IFD, '>', qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.$file_ext}) or $logger->error(qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.$file_ext: $!}) and return;
+	binmode(IFD);
 	print IFD $image;
 	close IFD;
 
@@ -930,6 +948,7 @@ sub process_pic {
 	$logger->info($self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} . qq{/$photo_title - $resolution px / $photo_size});
 
 	open(IFD, '>', qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.$file_ext}) or $logger->error(qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.$file_ext: $!}) and return;
+	binmode(IFD);
 	print IFD $image;
 	close IFD;
 
@@ -960,7 +979,6 @@ sub save_layout {
 
 	my $layout = Data::Dumper->Dump([$LAYOUT]);
 	open (LAY, '>', qq{$GROUP/MEMBERS/layout.dump}) or die qq{$GROUP/MEMBERS/layout.dump: $!\n};
-	binmode LAY,':encoding(utf-8)';
 	print LAY $layout;
 	close LAY;
 }
@@ -1076,7 +1094,6 @@ sub process_members {
 
 package GrabYahoo::Photos;
 
-use Data::Dumper;
 use HTML::Entities;
 
 sub new {
@@ -1090,7 +1107,6 @@ sub new {
 		my $buf = $/;
 		$/ = undef;
 		open(LAY, '<', qq{$GROUP/PHOTOS/layout.dump}) or die qq{$GROUP/PHOTOS/layout.dump: $!\n};
-		binmode LAY,':encoding(utf-8)';
 		my $dump = <LAY>;
 		close LAY;
 		$/ = $buf;
@@ -1111,7 +1127,6 @@ sub save_layout {
 
 	my $layout = Data::Dumper->Dump([$LAYOUT]);
 	open (LAY, '>', qq{$GROUP/PHOTOS/layout.dump}) or die qq{$GROUP/PHOTOS/layout.dump: $!\n};
-	binmode LAY,':encoding(utf-8)';
 	print LAY $layout;
 	close LAY;
 }
@@ -1146,7 +1161,6 @@ sub generate_index {
 	my $layout = $self->{'LAYOUT'};
 
 	open (HD, '>', $GROUP . '/PHOTOS/index.html') or die $GROUP . '/PHOTOS/index.html: ' . $! . "\n";
-	binmode HD,':encoding(utf-8)';
 	print HD q{
 <HTML>
 <BODY BACKGROUND='WHITE'>
@@ -1345,12 +1359,23 @@ sub process_pic {
 	}
 
 	my $image = $client->fetch($img_url, $url, 1);
+	unless ($image) {
+		$img_url =~ s!/or/!/hr/!;
+		$logger->warn('Original image missing - trying high resolution');
+		$image = $client->fetch($img_url, $url, 1);
+	}
+	unless ($image) {
+		$img_url =~ s!/hr/!/sn/!;
+		$logger->warn('HiRes image missing - trying low resolution');
+		$image = $client->fetch($img_url, $url, 1);
+	}
 
 	return unless $image;
 
 	$logger->info($self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_NAME'} . qq{/$photo_title - $resolution px / $photo_size});
 
 	open(IFD, '>', "$GROUP/PHOTOS/$album_id/$pic_id.$file_ext") or $logger->error("$GROUP/PHOTOS/$album_id/$pic_id.$file_ext: $!") and return;
+	binmode(IFD);
 	print IFD $image;
 	close IFD;
 
