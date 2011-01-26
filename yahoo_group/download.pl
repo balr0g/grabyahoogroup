@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.13 2011-01-21 05:38:53 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.14 2011-01-26 02:26:41 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
@@ -23,6 +23,7 @@ my $GROUP;
 my $logger;
 my $client;
 
+my $HTTP_PROXY_URL = ''; # Proxy server if any http://hostname:port/
 
 my $gyg = new GrabYahoo;
 
@@ -219,6 +220,7 @@ sub new {
 	$self->pass($pass);
 
 	my $ua = new LWP::UserAgent;
+	$ua->proxy('http', $HTTP_PROXY_URL) if $HTTP_PROXY_URL;	
 	$ua->agent('GrabYahoo/2.00');
 	my $cookie_file = "$GROUP/$user.cookie";
 	my $cookie_jar = HTTP::Cookies->new( 'file' => $cookie_file );
