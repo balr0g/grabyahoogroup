@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.14 2011-01-26 02:26:41 mithun Exp $
+# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.15 2011-02-14 00:26:06 mithun Exp $
 
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
@@ -12,7 +12,8 @@ use Crypt::SSLeay;
 use HTTP::Cookies ();
 use LWP::UserAgent ();
 use LWP::Simple ();
-use HTML::Entities;
+use HTML::Entities();
+use Encode;
 
 use Data::Dumper;
 # $Data::Dumper::Useqq = 1;
@@ -42,7 +43,6 @@ sub new {
 	my $ATTACHMENTS;
 	my $PHOTOS;
 	my $MEMBERS;
-	my $ALL;
 
 	my $USERNAME = '';
 	my $PASSWORD = '';
@@ -64,7 +64,6 @@ sub new {
 				 'attachments!' => \$ATTACHMENTS,
 				 'photos!' => \$PHOTOS,
 				 'members!' => \$MEMBERS,
-				 'all' => \$ALL,
 				 'begin=i' => \$BEGIN_MSGID,
 				 'end=i' => \$END_MSGID,
 				 'username=s' => \$USERNAME,
@@ -105,7 +104,9 @@ sub new {
 		chomp $USERNAME;
 	}
 
-	foreach ($MESSAGES, $FILES, $ATTACHMENTS, $PHOTOS) { $_ = 1 if $ALL; };
+	unless ($MESSAGES or $FILES or $ATTACHMENTS or $PHOTOS or $MEMBERS) {
+		foreach ($MESSAGES, $FILES, $ATTACHMENTS, $PHOTOS, $MEMBERS) { $_ = 1 };
+	}
 
 	my $self = {};
 
@@ -122,13 +123,22 @@ sub new {
 
 	my $content = $client->response()->content();
 
-	$logger->info('Detecting server capabilities');
+	my ($capabilities) = $content =~ m!<div class="ygrp-contentblock">\s+<ul class="ygrp-ul menulist">\s+(.+?)\s+</ul>!s;
+
+	# Ensure we use the group name Yahoo is familiar with
+	($GROUP) = $capabilities =~ m!<li class="active"> <a href="/group/(.+?)/!s;
+	unless ($GROUP) {
+		$logger->debug($capabilities);
+		die "Group capabilities missing\n";
+	}
+
+	$logger->info('Detecting server side capabilities');
 	# Detect capabilities
-	$MESSAGES = ($MESSAGES and $content =~ m!<a href="/group/$GROUP/messages">!s) ? 1: 0;
-	$FILES = ($FILES and $content =~ m!<a href="/group/$GROUP/files">!s) ? 1: 0;
-	$ATTACHMENTS = ($ATTACHMENTS and $content =~ m!<a class="sublink" href="/group/$GROUP/attachments/folder/0/list">!s) ? 1: 0;
-	$PHOTOS = ($PHOTOS and $content =~ m!<a href="http://.+?/group/$GROUP/photos">!s) ? 1: 0;
-	$MEMBERS = ($MEMBERS and $content =~ m!<a href="/group/$GROUP/members">!s) ? 1: 0;
+	$MESSAGES = ($MESSAGES and $capabilities =~ m!/group/$GROUP/messages!s) ? 1: 0;
+	$FILES = ($FILES and $capabilities =~ m!/group/$GROUP/files">!s) ? 1: 0;
+	$ATTACHMENTS = ($ATTACHMENTS and $capabilities =~ m!/group/$GROUP/attachments/folder/0/list!s) ? 1: 0;
+	$PHOTOS = ($PHOTOS and $capabilities =~ m!/group/$GROUP/photos!s) ? 1: 0;
+	$MEMBERS = ($MEMBERS and $capabilities =~ m!/group/$GROUP/members!s) ? 1: 0;
 
 	if ($MESSAGES) {
 		$logger->info('MESSAGES enabled');
@@ -195,7 +205,6 @@ sub process {
 package GrabYahoo::Client;
 
 use HTTP::Request::Common qw(GET POST);
-use HTML::Entities;
 
 
 sub new {
@@ -275,6 +284,19 @@ sub fetch {
 		}
 	}
 
+	my ($message_block) = $content =~ m#<!-- start content include -->.+?<div class="ygrp-contentblock">(.+?)</div>#s;
+
+	if ($message_block and $message_block !~ /</s and $content =~ m!<td class="ygrp-topic-title entry-title" align=left>!s) {
+		$message_block =~ s/^\s+//;
+		$message_block =~ s/\s+$//;
+		$logger->error($message_block);
+		$self->error_count();
+		$logger->warn(qq/Sleeping for one hour/);
+		$logger->info('Next check on ' . localtime(time() + 60*60));
+		sleep(60*60);
+		$content = $self->fetch($url,$referrer,$is_image);
+	}
+
 	if ($content =~ /error 999/s) {
 		$logger->error('Yahoo quota block kicked in');
 		$self->error_count();
@@ -288,11 +310,6 @@ sub fetch {
 		$message =~ s!<.+?>!!sg;
 		$message =~ s!&.+?;!!sg;
 		$logger->error($message);
-	}
-
-	if ($content =~ /Yahoo! Groups is an advertising supported service/ or $content =~ /Continue to message/s) {
-		$logger->debug($response->code());
-		$content = $self->fetch($url,$referrer,$is_image);
 	}
 
 	if (my ($login_url) = $content =~ m!<h4><a href="(http://login.yahoo.com/config/.+?)"!s) {
@@ -327,8 +344,13 @@ sub fetch {
 			$redirect = $url;
 			$self->error_count();
 		}
-		$redirect = decode_entities($redirect);
-		$url = $self->get_absurl($redirect);
+		$redirect = HTML::Entities::decode($redirect);
+		if ($redirect =~ m!interrupt!) {
+			$logger->info('Advertizement interrupt');
+			$content = $self->fetch($redirect,$referrer,$is_image);
+		} else {
+			$url = $self->get_absurl($redirect);
+		}
 		$logger->info(qq/Redirected to: $url/);
 		$content = $self->fetch($url,$referrer,$is_image);
 	}
@@ -549,17 +571,50 @@ sub process {
 	my $force = $self->{'FORCE_GET'};
 
 	mkdir qq{$GROUP/MESSAGES} or die qq{$GROUP/MESSAGES: $!\n} unless -d qq{$GROUP/MESSAGES};
-	my $content = $client->fetch(qq{/group/$GROUP/messages/1?xm=1&m=s&l=1&o=0});
-	my ($beg_msg, $end_msg) = $content =~ m!<table cellpadding="0" cellspacing="0" class="headview headnav"><tr>\s<td class="viewright">\s\w+ <em>(\d+) - \d+</em> \w+ (\d+) !s;
-	foreach my $msg_idx (reverse($beg_msg..$end_msg)) {
-		next unless ($force or -s "$GROUP/MESSAGES/$msg_idx");
+	my $content = $client->fetch(qq{/group/$GROUP/messages/1?xm=1&m=s&l=1&o=1});
+	my ($end_msg) = $content =~ m!<table cellpadding="0" cellspacing="0" class="headview headnav"><tr>\s<td class="viewright">\s\w+ <em>\d+ - \d+</em> \w+ (\d+) !s;
+	foreach my $msg_idx (reverse(1..$end_msg)) {
+		next if (!$force and -f qq!$GROUP/MESSAGES/$msg_idx!);
+		$self->save_message($msg_idx);
 	}
 }
 
 
-package GrabYahoo::Files;
+sub save_message {
+	my $self = shift;
 
-use HTML::Entities;
+	my ($idx) = @_;
+
+	my $content = $client->fetch(qq{/group/$GROUP/message/$idx?source=1});
+	my ($message) = $content =~ m!<td class="source user">\s+(From .+?)</td>!s;
+	unless ($message) {
+		my ($message_block) = $content =~ m#<!-- start content include -->.+?<div class="ygrp-contentblock">(.+?)</div>#s;
+		$message_block =~ s/^\s+//;
+		$message_block =~ s/\s+$//;
+		$logger->warn($idx . ': ' . $message_block);
+		return;
+	}
+	#Strip all Yahoo tags
+	$message =~ s!<.+?>!!sg;
+	# Get original HTML back
+	$message = HTML::Entities::decode($message);
+	my ($header, $body) = $message =~ m!^(.+?)\n\n(.+)$!s;
+	#Yahoo gobbles the whitespace on continuation line
+	$header =~ s!\n([\w-]+) !\n    $1 !sg;
+	my ($subject) = $header =~ m!\nSubject: (.*?)\n[\w-]+:!s;
+	$subject = '[NO SUBJECT]' unless $subject;
+	$subject =~ s!\n!!sg;
+	$subject = Encode::decode('MIME-Header', $subject);
+	$logger->info($idx . ':' . $subject);
+	open(MH, '>', qq!$GROUP/MESSAGES/$idx!) or die qq{$GROUP/MESSAGES/$idx: $!\n};
+	print MH $header;
+	print MH "\n\n";
+	print MH $body;
+	close MH;
+}
+
+
+package GrabYahoo::Files;
 
 
 sub new {
@@ -600,7 +655,7 @@ sub process_folder {
 	while ($body =~ m!<span class="title">\s+<a href="(.+?)">(.+?)</a>\s+</span>!sg) {
 		my $link = $1;
 		my $description = $2;
-		$description = decode_entities($description);
+		$description = HTML::Entities::decode($description);
 		if ($link =~ m!/group/$GROUP/files/!) {
 			$self->process_folder($link);
 		} else {
@@ -622,7 +677,6 @@ sub process_folder {
 
 package GrabYahoo::Attachments;
 
-use HTML::Entities;
 
 sub new {
 	my $package = shift;
@@ -711,12 +765,12 @@ sub generate_index {
 		};
 		foreach my $folder_id (keys %{$layout->{'FOLDER'}}) {
 			my $album = $layout->{'FOLDER'}->{$folder_id};
-			my $subject = encode_entities($album->{'FOLDER_NAME'});
-			my $number_attach = encode_entities($album->{'NUMBER_ATTACHMENTS'});
-			my $creator = encode_entities($album->{'FOLDER_CREATOR'});
+			my $subject = HTML::Entities::encode($album->{'FOLDER_NAME'});
+			my $number_attach = HTML::Entities::encode($album->{'NUMBER_ATTACHMENTS'});
+			my $creator = HTML::Entities::encode($album->{'FOLDER_CREATOR'});
 			my $profile = $album->{'CREATOR_PROFILE'};
-			my $create_date = encode_entities($album->{'CREATE_DATE'});
-			my $message = encode_entities($album->{'MESSAGE'});
+			my $create_date = HTML::Entities::encode($album->{'CREATE_DATE'});
+			my $message = HTML::Entities::encode($album->{'MESSAGE'});
 			$message = 'http://groups.yahoo.com' . $message if $message !~ /^http/;
 
 			my $creator_profile = ($profile) ? qq#<TD><A HREF="$profile">$creator</A></TD>#: qq#<TD>$creator</TD>#;
@@ -740,7 +794,7 @@ sub generate_index {
 		foreach my $folder_id (keys %{$layout->{'FOLDER'}}) {
 			my $folder = $layout->{'FOLDER'}->{$folder_id};
 			next unless $folder->{'ITEM'};
-			my $subject = encode_entities($folder->{'FOLDER_NAME'});
+			my $subject = HTML::Entities::encode($folder->{'FOLDER_NAME'});
 			print HD qq{
 <P ALIGN="CENTER">
 <A NAME="$folder_id">$subject</A>
@@ -761,14 +815,14 @@ sub generate_index {
 			};
 			foreach my $picid (keys %{$folder->{'ITEM'}}) {
 				my $picture = $folder->{'ITEM'}->{$picid};
-				my $title = encode_entities($picture->{'PHOTO_TITLE'});
-				my $creator = encode_entities($picture->{'USER'});
+				my $title = HTML::Entities::encode($picture->{'PHOTO_TITLE'});
+				my $creator = HTML::Entities::encode($picture->{'USER'});
 				my $profile = $picture->{'PROFILE'};
-				my $name = encode_entities($picture->{'FILE_NAME'});
-				my $size = encode_entities($picture->{'SIZE'});
-				my $posted = encode_entities($picture->{'POSTED'});
-				my $resolution = encode_entities($picture->{'RESOLUTION'});
-				my $extension = encode_entities($picture->{'FILE_EXT'});
+				my $name = HTML::Entities::encode($picture->{'FILE_NAME'});
+				my $size = HTML::Entities::encode($picture->{'SIZE'});
+				my $posted = HTML::Entities::encode($picture->{'POSTED'});
+				my $resolution = HTML::Entities::encode($picture->{'RESOLUTION'});
+				my $extension = HTML::Entities::encode($picture->{'FILE_EXT'});
 
 				print HD qq{
 	<TR>
@@ -814,12 +868,12 @@ sub process_folder {
 	# Yahoo sometimes looses track of the picture details
 	while ($content =~ m!<a href="(http://[^/]+?.yimg.com/kq/groups/\d+/(\d+)/name/[^"]+?)".*?>(.+?)</a>!sg) {
 		my ($img_url, $pic_id, $file_name) = ($1, $2, $3);
-		$file_name = decode_entities($file_name);
+		$file_name = HTML::Entities::decode($file_name);
 		my ($photo_title, $file_ext) = $file_name =~ m{^(.+?)\.([^.]+)$};
 		$file_ext ||= 'jpg';
 		my ($profile, $user, $posted) = $content =~ m!<div class="ygrp-description">.+?&nbsp;\s+<a href="(.+?)">(.+?)</a>\s+-\s+(.+?)&nbsp;!s;
-		$user = decode_entities($user);
-		$posted = decode_entities($posted);
+		$user = HTML::Entities::decode($user);
+		$posted = HTML::Entities::decode($posted);
 		my ($folder_id) = $url =~ m!/group/$GROUP/attachments/folder/(\d+)/item/list!;
 		$self->process_broken_pic($url, $img_url, $file_name, $photo_title, $file_ext, $profile, $user, $posted, $folder_id, $pic_id);
 	};
@@ -829,12 +883,12 @@ sub process_folder {
 		next if $record =~ / header /s;
 		$more_pages++;
 		my ($folder_url, $folder_id, $folder_name) = $record =~ m!<a href="(/group/$GROUP/attachments/folder/(\d+)/item/list)">(.+?)</a>!sg;
-		$folder_name = decode_entities($folder_name);
+		$folder_name = HTML::Entities::decode($folder_name);
 		my ($number_attachments) = $record =~ m!<td class="ygrp-photos-attachments ">\s+(\d+)</td>!s;
 		my ($folder_creator) = $record =~ m!<td class="ygrp-photos-author ">(.+?)</td>!s;
 		my $creator_profile;
 		($creator_profile, $folder_creator) = $folder_creator =~ m!<a\s+href="(.+?)">(.+?)</a>!s if $folder_creator =~ /href/;
-		$folder_creator = decode_entities($folder_creator);
+		$folder_creator = HTML::Entities::decode($folder_creator);
 		my ($create_date) = $record =~ m!<td class="ygrp-photos-date selected">\s+(.+?)</td>!s;
 		my ($message) = $record =~ m!<td class="ygrp-photos-view-original">\s+<a href="(.+?)"+?>!s;
 		$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'FOLDER_NAME'} = $folder_name;
@@ -912,19 +966,19 @@ sub process_pic {
 
 	my ($img_url) = $content =~ m!<div class="ygrp-photos-body-image".+?>\s+<img src="(.+?)"!s;
 	my ($profile, $user) = $content =~ m!<div id="ygrp-photos-by">.+?:&nbsp;<a\s+href="(.+?)">(.+?)<!s;
-	$user = decode_entities($user);
+	$user = HTML::Entities::decode($user);
 	my ($photo_title) = $content =~ m!<div id="ygrp-photos-title">(.+?)</div>!s;
-	$photo_title = decode_entities($photo_title);
+	$photo_title = HTML::Entities::decode($photo_title);
 	my ($file_name) = $content =~ m!<div id="ygrp-photos-filename">.+?:&nbsp;(.+?)<!s;
-	$file_name = decode_entities($file_name);
+	$file_name = HTML::Entities::decode($file_name);
 	my ($file_ext) = $file_name =~ m{\.([^.]+)$};
 	$file_ext ||= 'jpg';
 	my ($posted) = $content =~ m!<div id="ygrp-photos-posted">.+?:&nbsp;(.+?)<!s;
-	$posted = decode_entities($posted);
+	$posted = HTML::Entities::decode($posted);
 	my ($resolution) = $content =~ m!<div id="ygrp-photos-resolution">.+?:&nbsp;(.+?)<!s;
-	$resolution = decode_entities($resolution);
+	$resolution = HTML::Entities::decode($resolution);
 	my ($photo_size) = $content =~ m!<div id="ygrp-photos-size">.+?:&nbsp;(.+?)<!s;
-	$photo_size = decode_entities($photo_size);
+	$photo_size = HTML::Entities::decode($photo_size);
 
 	if (!$force and $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id} and
 		-f qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id/$pic_id.} . $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}->{$pic_id}->{'FILE_EXT'}) {
@@ -1053,16 +1107,22 @@ sub process_members {
 	while ($body =~ m!(<td class="info">\s+.+?</tr>)!sg) {
 		my $row = $1;
 		$more_pages++;
-		my ($profile1, $name) = $row =~ m!<span class="name">\s+.*?<a href="(.+?)".*?>(.+?)</a> </span>!s;
-		my ($user_details) = $row =~ m!<div class="demo">(.+?<br>.+?)</div>!s;
-		my ($rname, $age, $gender, $location);
-		if ($user_details =~ m!</span>!s) {
-			($rname, $age, $gender, $location) = $user_details =~ m!<span.+?>(.+?)</span>\s+<span.+?>(.+?)</span>\s+<span.+?>(.+?)</span>\s+<br>\s+<span.+?>(.+?)</span>!s;
-		} else {
-			($rname, $age, $gender, $location) = $user_details =~ m!<div class="form-hr"></div>\s+(\w.+?) &middot; (.+?) &middot; (.+?) <br> (.+) !s;
-		}
+		my ($name_details) = $row =~ m!<span class="name">(.+?)</span>!s;
+		my ($profile1, $name) = $name_details =~ m!<a href="(.+?)".*?>(.+)</a>!s;
+		$profile1 ||= '';
+		$name ||= '';
+		my ($full_name) = $name_details =~ m!<a href=".+?" title="(.+?)">!s;
+		$name = $full_name if $full_name;
+		my ($user_details) = $row =~ m!<div class="demo">\s+<div class="form-hr"></div>\s+(.+?<br>.+?)</div>!s;
+		my @items = $user_details =~ /(.+)<br>(.+)/s;
+		@items = map {my @parts = split / &middot; /, $_; @parts; } @items;
+		@items = map {my @parts = split /<.?span.*?>/, $_; @parts; } @items;
+		@items = grep { $_ !~ /^\s*$/ } @items;
+		@items = map {$_=~ s/^\s//; $_ =~ s/\s$//; $_; } @items;
+		my ($rname, $age, $gender, $location) = @items;
 		my ($profile2, $yid) =  $row =~ m!<td class="yid ygrp-nowrap">\s+<a href="(.+?)".*?>(.+?)</a> </td>!s;
-		my ($email) = $row =~ m!<td class="email ygrp-nowrap">\s+<a href=.+?>(.+?)</a>!s;
+		my ($email_title, $email) = $row =~ m!<td class="email ygrp-nowrap">\s+<a href=".+?"(.*?)>(.+?)</a>!s;
+		$email = $1 if $email_title =~ /title="(.+?)"/;
 		unless ($yid) {
 			$profile2 = 'PROFILE DELETED';
 			$profile1 = 'PROFILE DELETED';
@@ -1071,6 +1131,13 @@ sub process_members {
 		}
 		my ($email_delivery) = $row =~ m!<select name="submode.0".+?<option value="\d" selected>\s+(\w.+?)</option>!s;
 		my ($email_prefs) = $row =~ m!<select name="emailPref.0" >.+?<option value="\d" selected>\s+(\w.+?)</option>!s;
+
+		$profile2 ||= '';
+		$rname ||= '';
+		$age ||= '';
+		$gender ||= '';
+		$location ||= '';
+		$email ||= '';
 		$email_delivery ||= '';
 		$email_prefs ||= '';
 
@@ -1096,7 +1163,6 @@ sub process_members {
 
 package GrabYahoo::Photos;
 
-use HTML::Entities;
 
 sub new {
 	my $package = shift;
@@ -1184,12 +1250,12 @@ sub generate_index {
 };
 		foreach my $aid (keys %{$layout->{'ALBUM'}}) {
 			my $album = $layout->{'ALBUM'}->{$aid};
-			my $name = encode_entities($album->{'ALBUM_NAME'});
-			my $access = encode_entities($album->{'ALBUM_ACCESS'});
-			my $creator = encode_entities($album->{'ALBUM_CREATOR'});
+			my $name = HTML::Entities::encode($album->{'ALBUM_NAME'});
+			my $access = HTML::Entities::encode($album->{'ALBUM_ACCESS'});
+			my $creator = HTML::Entities::encode($album->{'ALBUM_CREATOR'});
 			my $profile = $album->{'CREATOR_PROFILE'};
-			my $number = encode_entities($album->{'NUMBER_PHOTOS'});
-			my $modified = encode_entities($album->{'LAST_MODIFIED'});
+			my $number = HTML::Entities::encode($album->{'NUMBER_PHOTOS'});
+			my $modified = HTML::Entities::encode($album->{'LAST_MODIFIED'});
 
 			print HD qq{
 	<TR>
@@ -1210,7 +1276,7 @@ sub generate_index {
 		foreach my $aid (keys %{$layout->{'ALBUM'}}) {
 			my $album = $layout->{'ALBUM'}->{$aid};
 			next unless $album->{'PICTURES'};
-			my $album_name = encode_entities($album->{'ALBUM_NAME'});
+			my $album_name = HTML::Entities::encode($album->{'ALBUM_NAME'});
 			print HD qq{
 <P ALIGN="CENTER">
 <A NAME="$aid">$album_name</A>
@@ -1231,14 +1297,14 @@ sub generate_index {
 			};
 			foreach my $picid (keys %{$album->{'PICTURES'}}) {
 				my $picture = $album->{'PICTURES'}->{$picid};
-				my $title = encode_entities($picture->{'PHOTO_TITLE'});
-				my $creator = encode_entities($picture->{'USER'});
+				my $title = HTML::Entities::encode($picture->{'PHOTO_TITLE'});
+				my $creator = HTML::Entities::encode($picture->{'USER'});
 				my $profile = $picture->{'PROFILE'};
-				my $name = encode_entities($picture->{'FILE_NAME'});
-				my $size = encode_entities($picture->{'SIZE'});
-				my $posted = encode_entities($picture->{'POSTED'});
-				my $resolution = encode_entities($picture->{'RESOLUTION'});
-				my $extension = encode_entities($picture->{'FILE_EXT'});
+				my $name = HTML::Entities::encode($picture->{'FILE_NAME'});
+				my $size = HTML::Entities::encode($picture->{'SIZE'});
+				my $posted = HTML::Entities::encode($picture->{'POSTED'});
+				my $resolution = HTML::Entities::encode($picture->{'RESOLUTION'});
+				my $extension = HTML::Entities::encode($picture->{'FILE_EXT'});
 
 				print HD qq{
 	<TR>
@@ -1283,10 +1349,10 @@ sub process_album {
 		my $record = $1;
 		$more_pages++;
 		my ($album_url, $album_id, $album_name) = $record =~ m!<div class="ygrp-photos-title ">.+?<a href="(/group/$GROUP/photos/album/(\d+)/pic/list).*?>(.+?)</a>!sg;
-		$album_name = decode_entities($album_name);
+		$album_name = HTML::Entities::decode($album_name);
 		my ($album_access) = $record =~ m!<div class="ygrp-photos-access">\s+(.+?)</div>!s;
 		my ($creator_profile, $album_creator) = $record =~ m!<div class="ygrp-photos-creator "><a\s+href="(.+?)">(.+?)</a>!s;
-		$album_creator = decode_entities($album_creator);
+		$album_creator = HTML::Entities::decode($album_creator);
 		my ($number_photos) = $record =~ m!<div class="ygrp-photos-size">(\d+)</div>!s;
 		my ($last_modified) = $record =~ m!<div class="ygrp-photos-modified-date selected">\s+(.+?)</div>!s;
 		$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'ALBUM_NAME'} = $album_name;
@@ -1330,19 +1396,19 @@ sub process_pic {
 
 	my ($img_url) = $content =~ m!<div id="spotlight" class="ygrp-photos-body-image".+?><img src="(.+?)"!s;
 	my ($profile, $user) = $content =~ m!<div id="ygrp-photos-by">.+?:&nbsp;<a\s+href="(.+?)">(.+?)<!s;
-	$user = decode_entities($user);
+	$user = HTML::Entities::decode($user);
 	my ($photo_title) = $content =~ m!<div id="ygrp-photos-title">(.+?)</div>!s;
-	$photo_title = decode_entities($photo_title);
+	$photo_title = HTML::Entities::decode($photo_title);
 	my ($file_name) = $content =~ m!<div id="ygrp-photos-filename">.+?:&nbsp;(.+?)<!s;
-	$file_name = decode_entities($file_name);
+	$file_name = HTML::Entities::decode($file_name);
 	my ($file_ext) = $file_name =~ m!\.([^.]+)$!;
 	$file_ext ||= 'jpg';
 	my ($posted) = $content =~ m!<div id="ygrp-photos-posted">.+?:&nbsp;(.+?)<!s;
-	$posted = decode_entities($posted);
+	$posted = HTML::Entities::decode($posted);
 	my ($resolution) = $content =~ m!<div id="ygrp-photos-resolution">.+?:&nbsp;(.+?)<!s;
-	$resolution = decode_entities($resolution);
+	$resolution = HTML::Entities::decode($resolution);
 	my ($photo_size) = $content =~ m!<div id="ygrp-photos-size">.+?:&nbsp;(.+?)<!s;
-	$photo_size = decode_entities($photo_size);
+	$photo_size = HTML::Entities::decode($photo_size);
 
 	$self->{'LAYOUT'}->{'ALBUM'}->{$album_id}->{'PICTURES'}->{$pic_id} = {
 					'USER' => $user,
