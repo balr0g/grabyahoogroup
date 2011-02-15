@@ -271,7 +271,7 @@ sub fetch {
 
 	if ($response->is_error()) {
 		if ($response->code() > 499 and $response->code() < 600) {
-			$logger->warn(': Document Not Accessible - report to Yahoo');
+			$logger->warn($url . ': Document Not Accessible - report to Yahoo');
 			$self->error_count();
 			$logger->info('Sleeping for 1 min');
 			$logger->info('Next check on ' . localtime(time() + 60));
