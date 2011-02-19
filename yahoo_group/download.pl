@@ -572,7 +572,7 @@ sub process {
 
 	mkdir qq{$GROUP/MESSAGES} or die qq{$GROUP/MESSAGES: $!\n} unless -d qq{$GROUP/MESSAGES};
 	my $content = $client->fetch(qq{/group/$GROUP/messages/1?xm=1&m=s&l=1&o=1});
-	my ($end_msg) = $content =~ m!<table cellpadding="0" cellspacing="0" class="headview headnav"><tr>\s<td class="viewright">\s\w+ <em>\d+ - \d+</em> \w+ (\d+) !s;
+	my ($end_msg) = $content =~ m!<table cellpadding="0" cellspacing="0" class="headview headnav"><tr>\s+<td class="viewright">\s+[^\s]+ <em>\d+ - \d+</em> [^\s]+ (\d+) !s;
 	foreach my $msg_idx (reverse(1..$end_msg)) {
 		next if (!$force and -f qq!$GROUP/MESSAGES/$msg_idx!);
 		$self->save_message($msg_idx);
@@ -1129,8 +1129,8 @@ sub process_members {
 			$name = $email;
 			$yid = $email;
 		}
-		my ($email_delivery) = $row =~ m!<select name="submode.0".+?<option value="\d" selected>\s+(\w.+?)</option>!s;
-		my ($email_prefs) = $row =~ m!<select name="emailPref.0" >.+?<option value="\d" selected>\s+(\w.+?)</option>!s;
+		my ($email_delivery) = $row =~ m!<select name="submode.0".+?<option value="\d" selected>\s+([^\s].+?)</option>!s;
+		my ($email_prefs) = $row =~ m!<select name="emailPref.0" >.+?<option value="\d" selected>\s+([^\s].+?)</option>!s;
 
 		$profile2 ||= '';
 		$rname ||= '';
