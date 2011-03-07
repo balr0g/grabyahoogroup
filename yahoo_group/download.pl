@@ -14,6 +14,7 @@ use LWP::UserAgent ();
 use LWP::Simple ();
 use HTML::Entities();
 use Encode;
+use URI::Escape;
 
 use Data::Dumper;
 # $Data::Dumper::Useqq = 1;
@@ -49,6 +50,7 @@ sub new {
 
 	my $BEGIN_MSGID;
 	my $END_MSGID;
+	my $MBOXIFY;
 
 	my $FORCE_GET;
 
@@ -58,6 +60,8 @@ sub new {
 	my $PHOTO_INDEX = 1;
 	my $ATTACH_INDEX = 1;
 
+	my $HELP = 0;
+
 
 	my $result = GetOptions ('messages!' => \$MESSAGES,
 				 'files!' => \$FILES,
@@ -66,6 +70,7 @@ sub new {
 				 'members!' => \$MEMBERS,
 				 'begin=i' => \$BEGIN_MSGID,
 				 'end=i' => \$END_MSGID,
+				 'mboxify!' => \$MBOXIFY,
 				 'username=s' => \$USERNAME,
 				 'password=s' => \$PASSWORD,
 				 'group=s' => \$GROUP,
@@ -74,9 +79,61 @@ sub new {
 				 'verbose+' => \$VERBOSE,
 				 'photo-index!' => \$PHOTO_INDEX,
 				 'attach-index!' => \$ATTACH_INDEX,
+				 'help!' => \$HELP,
 				);
 
-	die "Can't parse command line parameters" unless $result;
+	die "Can't parse command line parameters\n" unless $result;
+
+	if ($HELP) {
+		print qq{
+Usage:
+	$0 [--messages [[--mboxify] [--begin] [--end]]] [--files] [--attachments [--attach-index]] [--photos [--photo-index]] [--members] [--username] [--password] [--group] [--forceget] [--quiet] [--verbose] [--help]
+		messages: Retrieve all the email messages
+			begin: Oldest message to pick
+			end: Latest message to pick
+			mboxify: Generate mbox format file for the messages
+		files: Retrieve everything from the files section
+		attachments: Retrieve everything from the attachments section
+			attach-index: Generate html index page to browse the downloaded attachments
+		photos: Retrieve everything from the photos section
+			photo-index: Generate html index page to browse the downloaded photos
+		members: Retrieve everything from the members section including members, moderators, bouncing, pending and banned list
+
+		username: Login username
+		password: Login password
+
+		group: Group to process
+
+		forceget: Will download already downloaded content
+
+		quiet: Decrease logging one level
+		verbose: Increase logging one level
+
+		All the above options are optional especially if you are on a console or a terminal.
+
+		Username is optional if you have gone through authentication atleast once in the near past
+		Password is optional if you have gone through authentication atleast once in the near past and Yahoo doesn't ask for it again - this is usually once every two weeks
+
+		You can provide either or both the begin and end parameters for messages. Script defaults to 1 for begin and the last available on the website for end.
+
+		Photo Indexing and Attachment Indexing are enabled by default unless you want to dissable by passing --nophoto-index or --noattach-index
+
+		Members retrieval will report more details depending upon whether you are the moderator or creater of the group
+
+		There are five levels of logging debug, info, warn, error and fatal - you can increase or decrease more than one level by providing multiple quiet or verbose parameters. The script will apply the net of the two counts.
+
+MetaData:
+	GROUP/USERNAME.cookie: Authentication cookies are stored here - deleting it will force a login (no this wont help if Yahoo is blocking for maxed out quota)
+	GROUP/GrabYahooGroup.log: Log file to capture all output - feel free to delete whenever you like (it can get pretty large fast)
+	GROUP/[CAPABILITIES]/layout.dump: Human readable metadata used for generating index pages - can be used for custom html pages or other interfaces
+		\n};
+
+		exit 0;
+	}
+
+	die "Invalid begining message id\n" if ($BEGIN_MSGID and ($BEGIN_MSGID < 1));
+	die "Invalid end message id\n" if ($END_MSGID and ($END_MSGID < 1));
+	die "Begining message id can't be greater than end message id\n" if ($BEGIN_MSGID and $END_MSGID and ($BEGIN_MSGID > $END_MSGID));
 
 	my @terminals = GetTerminalSize(*STDOUT);
 
@@ -88,15 +145,26 @@ sub new {
 		chomp $GROUP;
 	}
 
+	die 'Group name is mandatory' unless $GROUP;
+
 	mkdir $GROUP or die "$GROUP: $!\n" unless -d $GROUP;
 
+	if ($VERBOSE > $QUIET) {
+		$QUIET = 0;
+	} else {
+		$QUIET -= $VERBOSE;
+	}
+	$logger = new GrabYahoo::Logger('file' => qq{$GROUP/GrabYahooGroup.log}, 'quiet' => $QUIET);
+	$logger->group($GROUP);
+	$logger->section(' ');
+
 	unless ($USERNAME) {
-		opendir(UD, $GROUP) or die qq/$GROUP: $!\n/;
+		opendir(UD, $GROUP) or $logger->fatal(qq/$GROUP: $!/);
 		while (my $record = readdir UD) { last if (($USERNAME) = $record =~ /^(.+)\.cookie$/); }
 		closedir UD;
 	}
 
-	die 'Username not provided and not running in terminal' unless $USERNAME or scalar @terminals;
+	$logger->fatal('Username not provided and not running in terminal') unless $USERNAME or scalar @terminals;
 
 	unless ($USERNAME) {
 		print "Enter username : ";
@@ -110,15 +178,6 @@ sub new {
 
 	my $self = {};
 
-	if ($VERBOSE > $QUIET) {
-		$QUIET = 0;
-	} else {
-		$QUIET -= $VERBOSE;
-	}
-	$logger = new GrabYahoo::Logger('file' => qq{$GROUP/GrabYahooGroup.log}, 'quiet' => $QUIET);
-	$logger->group($GROUP);
-	$logger->section(' ');
-
 	$client = new GrabYahoo::Client($USERNAME, $PASSWORD);
 
 	my $content = $client->response()->content();
@@ -129,7 +188,7 @@ sub new {
 	($GROUP) = $capabilities =~ m!<li class="active"> <a href="/group/(.+?)/!s;
 	unless ($GROUP) {
 		$logger->debug($capabilities);
-		die "Group capabilities missing\n";
+		$logger->fatal('Group capabilities missing');
 	}
 
 	$logger->info('Detecting server side capabilities');
@@ -280,7 +339,7 @@ sub fetch {
 		} elsif ($response->code() == 404 and $is_image) {
 			return '';
 		} else {
-			die qq/[$url] / . $response->as_string() if $response->is_error();
+			$logger->fatal(qq/[$url] / . $response->as_string()) if $response->is_error();
 		}
 	}
 
@@ -335,6 +394,7 @@ sub fetch {
 			($redirect) = $content =~ m!location\.replace\((.+?)\)!;
 			$redirect =~ s/"//g;
 			$redirect =~ s/'//g;
+			$redirect = HTML::Entities::decode($redirect);
 		}
 		if ($redirect =~ m!errors/framework_error!) {
 			$logger->warn('Yahoo framework error');
@@ -344,10 +404,11 @@ sub fetch {
 			$redirect = $url;
 			$self->error_count();
 		}
-		$redirect = HTML::Entities::decode($redirect);
 		if ($redirect =~ m!interrupt!) {
-			$logger->info('Advertizement interrupt');
+			$logger->info('Advertisements interrupt: ' . $redirect);
 			$content = $self->fetch($redirect,$referrer,$is_image);
+			($url) = $redirect =~ /done=(.+)$/;
+			$url = URI::Escape::uri_unescape($url);
 		} else {
 			$url = $self->get_absurl($redirect);
 		}
@@ -364,7 +425,7 @@ sub fetch {
 sub error_count {
 	my $self = shift;
 	$self->{'ERROR_COUNTER'}++;
-	die 'Too many errors from server' if $self->{'ERROR_COUNTER'} > 10;
+	$logger->fatal('Too many errors from server') if $self->{'ERROR_COUNTER'} > 10;
 	return $self->{'ERROR_COUNTER'};
 }
 
@@ -403,7 +464,7 @@ sub process_adultconf {
 	$cookie_jar->extract_cookies($response);
 	$self->response($response);
 
-	die '[/adultconf] ' . $response->as_string() if $response->is_error();
+	$logger->fatal('[/adultconf] ' . $response->as_string()) if $response->is_error();
 
 	return $response->content();
 }
@@ -445,7 +506,7 @@ sub process_loginform {
 
 	unless ($self->pass()) {
 		my @terminals = GetTerminalSize(*STDOUT);
-		die 'Password not provided and not running in terminal' unless scalar @terminals;
+		$logger->fatal('Password not provided and not running in terminal') unless scalar @terminals;
 		unless ($self->pass()) {
 			use Term::ReadKey;
 			ReadMode('noecho');
@@ -470,7 +531,7 @@ sub process_loginform {
 	$cookie_jar->extract_cookies($response);
 	$self->response($response);
 
-	die qq/[$post] / . $response->as_string() if $response->is_error();
+	$logger->fatal(qq/[$post] / . $response->as_string()) if $response->is_error();
 
 	return $response->content();
 }
@@ -509,7 +570,7 @@ sub new {
 	push @{ $self->{'HANDLES'} }, $file_handle;
 
 	# Various loggers
-	my @loggers = ('debug', 'info', 'warn', 'error', 'fatal');
+	my @loggers = ('debug', 'info', 'warn', 'error');
 	no strict 'refs';
 	foreach my $level (@loggers) {
 		my $tag = uc($level);
@@ -526,6 +587,13 @@ sub new {
 		};
 	}
 	use strict;
+	sub fatal {
+		my $self = shift;
+		my $group = $self->group();
+		my $section = $self->section();
+		$self->dispatch('[FATAL]', qq/[$group]/, qq/[$section]/, @_, "\n");
+		exit 255;
+	}
 
 	$self->group(' ');
 	$self->section(' ');
@@ -557,7 +625,10 @@ package GrabYahoo::Messages;
 sub new {
 	my $package = shift;
 	my %args = @_;
-	my $self = { 'FORCE_GET' => $args{'force'} };
+	my $self->{'FORCE_GET'} = $args{'force'};
+	$self->{'BEGIN_MSGID'} = $args{'begin'};
+	$self->{'END_MSGID'} = $args{'end'};
+	$self->{'MBOXIFY'} = $args{'mboxify'};
 	return bless $self;
 }
 
@@ -569,14 +640,59 @@ sub process {
 	$logger->info('Processing MESSAGES');
 
 	my $force = $self->{'FORCE_GET'};
+	my $begin_msg = $self->{'BEGIN_MSGID'} || 1;
+	my $end_msg = $self->{'END_MSGID'};
 
-	mkdir qq{$GROUP/MESSAGES} or die qq{$GROUP/MESSAGES: $!\n} unless -d qq{$GROUP/MESSAGES};
+	mkdir qq{$GROUP/MESSAGES} or $logger->fatal(qq{$GROUP/MESSAGES: } . $!) unless -d qq{$GROUP/MESSAGES};
 	my $content = $client->fetch(qq{/group/$GROUP/messages/1?xm=1&m=s&l=1&o=1});
-	my ($end_msg) = $content =~ m!<table cellpadding="0" cellspacing="0" class="headview headnav"><tr>\s+<td class="viewright">\s+[^\s]+ <em>\d+ - \d+</em> [^\s]+ (\d+) !s;
-	foreach my $msg_idx (reverse(1..$end_msg)) {
+	($end_msg) = $content =~ m!<table cellpadding="0" cellspacing="0" class="headview headnav"><tr>\s+<td class="viewright">\s+[^\s]+ <em>\d+ - \d+</em> [^\s]+ (\d+) !s unless $end_msg;
+	foreach my $msg_idx (reverse($begin_msg..$end_msg)) {
 		next if (!$force and -f qq!$GROUP/MESSAGES/$msg_idx!);
 		$self->save_message($msg_idx);
 	}
+
+	if ($self->{'MBOXIFY'}) {
+		$logger->info('Generating mbox file');
+		$self->mboxify();
+	}
+}
+
+
+sub mboxify {
+	my $self = shift;
+
+	open(MD, '>', qq{$GROUP/MESSAGES/$GROUP.mbox}) or $logger->fatal(qq{$GROUP/MESSAGES/$GROUP.mbox: } . $!);
+
+	my @sources;
+
+	opendir(MR, qq{$GROUP/MESSAGES/}) or $logger->fatal(qq{$GROUP/MESSAGES/: } . $!);
+	while (my $file = readdir MR) {
+		next if $file eq '.';
+		next if $file eq '..';
+		next if $file eq 'ATTACHMENTS';
+		push @sources, $file;
+	}
+	closedir MR;
+
+	$logger->info('Generating mbox file');
+
+	foreach my $file (sort {$a <=> $b} @sources) {
+		$logger->debug('Sourcing: ' . $file);
+		open(SD, '<', qq{$GROUP/MESSAGES/$file}) or $logger->fatal(qq{$GROUP/MESSAGES/$file: } . $!);
+		my $from_line = <SD>;
+		$from_line =~ s/From [^\s]+/From -/;
+		print MD $from_line;
+		my $line_terminator = $/;
+		$/ = undef;
+		my $msg = <SD>;
+		$/ = $line_terminator;
+		$msg =~ s/^(>*)From />$1From /mg;
+		print MD $msg;
+		print MD "\n";
+		close SD;
+	}
+
+	close MD;
 }
 
 
@@ -606,7 +722,7 @@ sub save_message {
 	$subject =~ s!\n!!sg;
 	$subject = Encode::decode('MIME-Header', $subject);
 	$logger->info($idx . ':' . $subject);
-	open(MH, '>', qq!$GROUP/MESSAGES/$idx!) or die qq{$GROUP/MESSAGES/$idx: $!\n};
+	open(MH, '>', qq!$GROUP/MESSAGES/$idx!) or $logger->fatal(qq{$GROUP/MESSAGES/$idx: } . $!);
 	print MH $header;
 	print MH "\n\n";
 	print MH $body;
@@ -621,6 +737,11 @@ sub new {
 	my $package = shift;
 	my %args = @_;
 	my $self = { 'FORCE_GET' => $args{'force'} };
+	$self->{'MSFILES'} = 0;
+	if ($^O eq 'MSWin32' or $^O eq 'cygwin' or $^O eq 'dos') {
+		$self->{'MSFILES'} = 1;
+		$logger->warn('Restricted filesystem - some filenames will be modified if downloaded');
+	}
 	return bless $self;
 }
 
@@ -629,7 +750,7 @@ sub process {
 	my $self = shift;
 	$logger->section('Files');
 	$logger->info('Processing FILES');
-	mkdir qq{$GROUP/FILES} or die qq{$GROUP/FILES: $!\n} unless -d qq{$GROUP/FILES};
+	mkdir qq{$GROUP/FILES} or $logger->fatal(qq{$GROUP/FILES: } . $!) unless -d qq{$GROUP/FILES};
 	$self->process_folder(qq{/group/$GROUP/files/});
 }
 
@@ -646,7 +767,7 @@ sub process_folder {
 	$folder =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/eg;
 
 	$logger->debug($folder);
-	mkdir qq{$GROUP/FILES/$folder} or die qq{$GROUP/FILES/$folder: $!\n} unless -d qq{$GROUP/FILES/$folder};
+	mkdir qq{$GROUP/FILES/$folder} or $logger->fatal(qq{$GROUP/FILES/$folder: } . $!) unless -d qq{$GROUP/FILES/$folder};
 
 	my $content = $client->fetch($url);
 
@@ -659,19 +780,28 @@ sub process_folder {
 		if ($link =~ m!/group/$GROUP/files/!) {
 			$self->process_folder($link);
 		} else {
-			if (!$force and -f qq{$GROUP/FILES/$folder$description}) {
-				$logger->debug(qq{$folder$description - exists [skipped]});
+			my $fs_name = $description;
+			$fs_name = $self->msfile($description) if $self->{'MSFILES'};
+			if (!$force and -f qq{$GROUP/FILES/$folder$fs_name}) {
+				$logger->debug(qq{$folder$fs_name - exists [skipped]});
 				next;
 			}
 			$logger->info($folder . $description);
 			my $file = $client->fetch($link, $url, 1);
 			next unless $file;
-			open(ID, '>', qq{$GROUP/FILES/$folder$description}) or die qq{$GROUP/FILES/$folder$description: $!\n};
+			open(ID, '>', qq{$GROUP/FILES/$folder$fs_name}) or $logger->fatal(qq{$GROUP/FILES/$folder$fs_name: } . $!);
 			binmode(ID);
 			print ID $file;
 			close ID;
 		}
 	}
+}
+
+
+sub msfiles {
+	my $self = shift;
+	my ($file_name) = @_;
+	return $file_name;
 }
 
 
@@ -688,7 +818,7 @@ sub new {
 	if (-f qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump}) {
 		my $buf = $/;
 		$/ = undef;
-		open(LAY, '<', qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump}) or die qq{$GROUP/PHOTOS/layout.dump: $!\n};
+		open(LAY, '<', qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump}) or $logger->fatal(qq{$GROUP/PHOTOS/layout.dump: } . $!);
 		my $dump = <LAY>;
 		close LAY;
 		$/ = $buf;
@@ -708,7 +838,7 @@ sub save_layout {
 	return unless $LAYOUT;
 
 	my $layout = Data::Dumper->Dump([$LAYOUT]);
-	open (LAY, '>', qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump}) or die qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump: $!\n};
+	open (LAY, '>', qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump}) or $logger->fatal(qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump: } . $!);
 	print LAY $layout;
 	close LAY;
 }
@@ -720,8 +850,8 @@ sub process {
 	$logger->section('Attachments');
 	$logger->info('Processing ATTACHMENTS');
 
-	mkdir qq{$GROUP/MESSAGES} or die qq{$GROUP/MESSAGES: $!\n} unless -d qq{$GROUP/MESSAGES};
-	mkdir qq{$GROUP/MESSAGES/ATTACHMENTS} or die qq{$GROUP/MESSAGES/ATTACHMENTS: $!\n} unless -d qq{$GROUP/MESSAGES/ATTACHMENTS};
+	mkdir qq{$GROUP/MESSAGES} or $logger->fatal(qq{$GROUP/MESSAGES: } . $!) unless -d qq{$GROUP/MESSAGES};
+	mkdir qq{$GROUP/MESSAGES/ATTACHMENTS} or $logger->fatal(qq{$GROUP/MESSAGES/ATTACHMENTS: } . $!) unless -d qq{$GROUP/MESSAGES/ATTACHMENTS};
 	my $start = 1;
 	my $next_page = 1;
 	while ($next_page) {
@@ -743,7 +873,7 @@ sub generate_index {
 
 	my $layout = $self->{'LAYOUT'};
 
-	open (HD, '>', $GROUP . '/MESSAGES/ATTACHMENTS/index.html') or die $GROUP . '/MESSAGES/ATTACHMENTS/index.html: ' . $! . "\n";
+	open (HD, '>', $GROUP . '/MESSAGES/ATTACHMENTS/index.html') or $logger->fatal($GROUP . '/MESSAGES/ATTACHMENTS/index.html: ' . $!);
 	print HD q{
 <HTML>
 <BODY BACKGROUND='WHITE'>
@@ -899,7 +1029,7 @@ sub process_folder {
 		$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'MESSAGE'} = $message;
 		$logger->debug($folder_name);
 		next if !$force and $self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'} and ($number_attachments == scalar (keys %{$self->{'LAYOUT'}->{'FOLDER'}->{$folder_id}->{'ITEM'}}) );
-		mkdir qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id} or die qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id: $!\n} unless -d qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id};
+		mkdir qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id} or $logger->fatal(qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id: } . $!) unless -d qq{$GROUP/MESSAGES/ATTACHMENTS/$folder_id};
 		my $start = 1;
 		my $next_page = 1;
 		while ($next_page) {
@@ -1034,7 +1164,7 @@ sub save_layout {
 	return unless $LAYOUT;
 
 	my $layout = Data::Dumper->Dump([$LAYOUT]);
-	open (LAY, '>', qq{$GROUP/MEMBERS/layout.dump}) or die qq{$GROUP/MEMBERS/layout.dump: $!\n};
+	open (LAY, '>', qq{$GROUP/MEMBERS/layout.dump}) or $logger->fatal(qq{$GROUP/MEMBERS/layout.dump: } . $!);
 	print LAY $layout;
 	close LAY;
 }
@@ -1046,7 +1176,7 @@ sub process {
 	$logger->section('Members');
 	$logger->info('Processing MEMBERS');
 
-	mkdir qq{$GROUP/MEMBERS} or die "$GROUP/MEMBERS: $!\n" unless -d qq{$GROUP/MEMBERS};
+	mkdir qq{$GROUP/MEMBERS} or $logger->fatal(qq{$GROUP/MEMBERS: } . $!) unless -d qq{$GROUP/MEMBERS};
 
 	my $start = 1;
 	my $next_page = 1;
@@ -1174,7 +1304,7 @@ sub new {
 	if (-f qq{$GROUP/PHOTOS/layout.dump}) {
 		my $buf = $/;
 		$/ = undef;
-		open(LAY, '<', qq{$GROUP/PHOTOS/layout.dump}) or die qq{$GROUP/PHOTOS/layout.dump: $!\n};
+		open(LAY, '<', qq{$GROUP/PHOTOS/layout.dump}) or $logger->fatal(qq{$GROUP/PHOTOS/layout.dump: } . $!);
 		my $dump = <LAY>;
 		close LAY;
 		$/ = $buf;
@@ -1194,7 +1324,7 @@ sub save_layout {
 	return unless $LAYOUT;
 
 	my $layout = Data::Dumper->Dump([$LAYOUT]);
-	open (LAY, '>', qq{$GROUP/PHOTOS/layout.dump}) or die qq{$GROUP/PHOTOS/layout.dump: $!\n};
+	open (LAY, '>', qq{$GROUP/PHOTOS/layout.dump}) or $logger->fatal(qq{$GROUP/PHOTOS/layout.dump: } . $!);
 	print LAY $layout;
 	close LAY;
 }
@@ -1206,7 +1336,7 @@ sub process {
 	$logger->section('Photos');
 	$logger->info('Processing PHOTOS');
 
-	mkdir qq{$GROUP/PHOTOS} or die "$GROUP/PHOTOS: $!\n" unless -d qq{$GROUP/PHOTOS};
+	mkdir qq{$GROUP/PHOTOS} or $logger->fatal(qq{$GROUP/PHOTOS: } . $!) unless -d qq{$GROUP/PHOTOS};
 	my $start = 1;
 	my $next_page = 1;
 	while ($next_page) {
@@ -1228,7 +1358,7 @@ sub generate_index {
 
 	my $layout = $self->{'LAYOUT'};
 
-	open (HD, '>', $GROUP . '/PHOTOS/index.html') or die $GROUP . '/PHOTOS/index.html: ' . $! . "\n";
+	open (HD, '>', $GROUP . '/PHOTOS/index.html') or $logger->fatal($GROUP . '/PHOTOS/index.html: ' . $!);
 	print HD q{
 <HTML>
 <BODY BACKGROUND='WHITE'>
@@ -1364,7 +1494,7 @@ sub process_album {
 		$logger->debug($album_name);
 		my $start = 1;
 		my $next_page = 1;
-		mkdir qq{$GROUP/PHOTOS/$album_id} or die qq{$GROUP/PHOTOS/$album_id: $!\n} unless -d qq{$GROUP/PHOTOS/$album_id};
+		mkdir qq{$GROUP/PHOTOS/$album_id} or $logger->fatal(qq{$GROUP/PHOTOS/$album_id: } . $!) unless -d qq{$GROUP/PHOTOS/$album_id};
 		while ($next_page) {
 			$next_page = $self->process_album($album_url . qq#?mode=list&order=mtime&start=$start&count=20&dir=desc#);
 			$start += 20;
