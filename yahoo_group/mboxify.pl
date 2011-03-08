@@ -25,6 +25,7 @@ while (my $file = readdir GHD) {
 	next if $file eq '.';
 	next if $file eq '..';
 	next if $file eq 'ATTACHMENTS';
+	next if $file =~ /\.mbox/;
 	die "$file: invalid message file found\n" if $file !~ /^\d+$/;
 	push @files, $file;
 }
