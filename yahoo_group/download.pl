@@ -50,7 +50,7 @@ sub new {
 
 	my $BEGIN_MSGID;
 	my $END_MSGID;
-	my $MBOXIFY;
+	my $MBOX = 1;
 
 	my $FORCE_GET;
 
@@ -59,6 +59,7 @@ sub new {
 
 	my $PHOTO_INDEX = 1;
 	my $ATTACH_INDEX = 1;
+	my $MEMBER_INDEX = 1;
 
 	my $HELP = 0;
 
@@ -70,7 +71,7 @@ sub new {
 				 'members!' => \$MEMBERS,
 				 'begin=i' => \$BEGIN_MSGID,
 				 'end=i' => \$END_MSGID,
-				 'mboxify!' => \$MBOXIFY,
+				 'mbox!' => \$MBOX,
 				 'username=s' => \$USERNAME,
 				 'password=s' => \$PASSWORD,
 				 'group=s' => \$GROUP,
@@ -79,6 +80,7 @@ sub new {
 				 'verbose+' => \$VERBOSE,
 				 'photo-index!' => \$PHOTO_INDEX,
 				 'attach-index!' => \$ATTACH_INDEX,
+				 'member-index!' => \$MEMBER_INDEX,
 				 'help!' => \$HELP,
 				);
 
@@ -87,17 +89,18 @@ sub new {
 	if ($HELP) {
 		print qq{
 Usage:
-	$0 [--messages [[--mboxify] [--begin] [--end]]] [--files] [--attachments [--attach-index]] [--photos [--photo-index]] [--members] [--username] [--password] [--group] [--forceget] [--quiet] [--verbose] [--help]
+	$0 [--messages [[--nombox] [--begin] [--end]]] [--files] [--attachments [--noattach-index]] [--photos [--nophoto-index]] [--members [--nomember-index]] [--username] [--password] [--group] [--forceget] [--quiet] [--verbose] [--help]
 		messages: Retrieve all the email messages
 			begin: Oldest message to pick
 			end: Latest message to pick
-			mboxify: Generate mbox format file for the messages
+			mbox: Generate mbox format file for the messages - enabled by default pass --nombox to turn it off
 		files: Retrieve everything from the files section
 		attachments: Retrieve everything from the attachments section
 			attach-index: Generate html index page to browse the downloaded attachments
 		photos: Retrieve everything from the photos section
 			photo-index: Generate html index page to browse the downloaded photos
 		members: Retrieve everything from the members section including members, moderators, bouncing, pending and banned list
+			member-index: Generate html index page to browse the member list
 
 		username: Login username
 		password: Login password
@@ -201,7 +204,7 @@ MetaData:
 
 	if ($MESSAGES) {
 		$logger->info('MESSAGES enabled');
-		my $object = eval { new GrabYahoo::Messages (force => $FORCE_GET, begin => $BEGIN_MSGID, end => $END_MSGID); };
+		my $object = eval { new GrabYahoo::Messages (force => $FORCE_GET, begin => $BEGIN_MSGID, end => $END_MSGID, mbox => $MBOX); };
 		if ($@) {
 			$logger->error( $@ );
 		} else {
@@ -241,7 +244,7 @@ MetaData:
 
 	if ($MEMBERS) {
 		$logger->info('MEMBERS enabled');
-		my $object = eval { new GrabYahoo::Members(force => $FORCE_GET); };
+		my $object = eval { new GrabYahoo::Members(force => $FORCE_GET, index => $MEMBER_INDEX); };
 		if ($@) {
 			$logger->error( $@ );
 		} else {
@@ -628,7 +631,7 @@ sub new {
 	my $self->{'FORCE_GET'} = $args{'force'};
 	$self->{'BEGIN_MSGID'} = $args{'begin'};
 	$self->{'END_MSGID'} = $args{'end'};
-	$self->{'MBOXIFY'} = $args{'mboxify'};
+	$self->{'MBOX'} = $args{'mbox'};
 	return bless $self;
 }
 
@@ -651,8 +654,7 @@ sub process {
 		$self->save_message($msg_idx);
 	}
 
-	if ($self->{'MBOXIFY'}) {
-		$logger->info('Generating mbox file');
+	if ($self->{'MBOX'}) {
 		$self->mboxify();
 	}
 }
@@ -670,6 +672,7 @@ sub mboxify {
 		next if $file eq '.';
 		next if $file eq '..';
 		next if $file eq 'ATTACHMENTS';
+		next if $file eq qq/$GROUP.mbox/;
 		push @sources, $file;
 	}
 	closedir MR;
@@ -1174,10 +1177,10 @@ sub process {
 	my $self = shift;
 
 	$logger->section('Members');
-	$logger->info('Processing MEMBERS');
 
 	mkdir qq{$GROUP/MEMBERS} or $logger->fatal(qq{$GROUP/MEMBERS: } . $!) unless -d qq{$GROUP/MEMBERS};
 
+	$logger->info('Processing MEMBERS');
 	my $start = 1;
 	my $next_page = 1;
 	while ($next_page) {
@@ -1186,6 +1189,7 @@ sub process {
 	}
 	$self->save_layout();
 
+	$logger->info('Processing MODERATORS');
 	$start = 1;
 	$next_page = 1;
 	while ($next_page) {
@@ -1194,6 +1198,7 @@ sub process {
 	}
 	$self->save_layout();
 
+	$logger->info('Processing BOUNCING');
 	$start = 1;
 	$next_page = 1;
 	while ($next_page) {
@@ -1202,6 +1207,7 @@ sub process {
 	}
 	$self->save_layout();
 
+	$logger->info('Processing PENDING');
 	$start = 1;
 	$next_page = 1;
 	while ($next_page) {
@@ -1210,6 +1216,7 @@ sub process {
 	}
 	$self->save_layout();
 
+	$logger->info('Processing BANNED');
 	$start = 1;
 	$next_page = 1;
 	while ($next_page) {
@@ -1218,10 +1225,98 @@ sub process {
 	}
 	$self->save_layout();
 
-	if (0 and $self->{'INDEX'}) {
+	if ($self->{'INDEX'}) {
 		$logger->info('Generating index page');
 		$self->generate_index();
 	}
+}
+
+
+sub generate_index {
+	my $self = shift;
+
+	my $layout = $self->{'LAYOUT'};
+
+	open (HD, '>', $GROUP . '/MEMBERS/index.html') or $logger->fatal($GROUP . '/MEMBERS/index.html: ' . $!);
+	print HD q{
+<HTML>
+<HEAD>
+	<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF8">
+</HEAD>
+<BODY BACKGROUND='WHITE'>
+};
+
+	if (scalar keys %{$layout}) {
+		print HD q{
+<TABLE BORDER='2' CELLPADDING='0' CELLSPACING='0'>
+	<TR><TD ALIGN="RIGHT" WIDTH='25%'><FONT COLOR='WHITE' SIZE='-1'><STRONG><A HREF="#members">MEMBERS</A></STRONG></FONT></TD></TR>
+	<TR><TD ALIGN="RIGHT" WIDTH='25%'><FONT COLOR='WHITE' SIZE='-1'><STRONG><A HREF="#moderators">MODERATORS</A></STRONG></FONT></TD></TR>
+	<TR><TD ALIGN="RIGHT" WIDTH='25%'><FONT COLOR='WHITE' SIZE='-1'><STRONG><A HREF="#bouncing">BOUNCING</A></STRONG></FONT></TD></TR>
+	<TR><TD ALIGN="RIGHT" WIDTH='25%'><FONT COLOR='WHITE' SIZE='-1'><STRONG><A HREF="#pending">PENDING</A></STRONG></FONT></TD></TR>
+	<TR><TD ALIGN="RIGHT" WIDTH='25%'><FONT COLOR='WHITE' SIZE='-1'><STRONG><A HREF="#banned">BANNED</A></STRONG></FONT></TD></TR>
+</TABLE>
+		};
+		foreach my $type ('MEMBERS', 'MODERATORS', 'BOUNCING', 'PENDING', 'BANNED') {
+			my $anchor = lc($type);
+			print HD qq{
+<P ALIGN="CENTER"><A NAME="$anchor">$type<A></P>
+<TABLE ALIGN='CENTER' BORDER='2' WIDTH='100%' CELLPADDING='0' CELLSPACING='0'>
+<THEAD>
+	<TR BGCOLOR='BLACK'>
+		<TD ALIGN='CENTER' WIDTH='11%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>YAHOO ID</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='11%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>NAME</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='11%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>REAL NAME</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='11%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>AGE</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='11%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>GENDER</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='11%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>LOCATION</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='11%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>EMAIL</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='11%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>EMAIL_DELIVERY</STRONG></FONT></TD>
+		<TD ALIGN='CENTER' WIDTH='11%'><FONT COLOR='WHITE' SIZE='-1'><STRONG>EMAIL_PREFS</STRONG></FONT></TD>
+	</TR>
+</THEAD>
+<TBODY>
+			};
+
+			foreach my $yid (keys %{ $layout->{$type} }) {
+				my $profile1 = $self->{'LAYOUT'}->{$type}->{$yid}->{'PROFILE1'} || '&nbsp;';
+				my $profile2 = $self->{'LAYOUT'}->{$type}->{$yid}->{'PROFILE2'} || '&nbsp;';
+				my $name = $self->{'LAYOUT'}->{$type}->{$yid}->{'NAME'} || '&nbsp;';
+				my $rname = $self->{'LAYOUT'}->{$type}->{$yid}->{'REAL_NAME'} || '&nbsp;';
+				my $age = $self->{'LAYOUT'}->{$type}->{$yid}->{'AGE'} || '&nbsp;';
+				my $gender = $self->{'LAYOUT'}->{$type}->{$yid}->{'GENDER'} || '&nbsp;';
+				my $location = $self->{'LAYOUT'}->{$type}->{$yid}->{'LOCATION'} || '&nbsp;';
+				my $email = $self->{'LAYOUT'}->{$type}->{$yid}->{'EMAIL'} || '&nbsp;';
+				my $email_delivery = $self->{'LAYOUT'}->{$type}->{$yid}->{'EMAIL_DELIVERY'} || '&nbsp;';
+				my $email_prefs = $self->{'LAYOUT'}->{$type}->{$yid}->{'EMAIL_PREFS'} || '&nbsp;';
+				print HD qq{
+	<TR>
+		<TD>$yid</TD>
+		<TD><A HREF="$profile1">$name</A></TD>
+		<TD><A HREF="$profile2">$rname</A></TD>
+		<TD>$age</TD>
+		<TD>$gender</TD>
+		<TD>$location</TD>
+		<TD><A HREF="mailto:$email">$email</A></TD>
+		<TD>$email_delivery</TD>
+		<TD>$email_prefs</TD>
+	</TR>
+				};
+			}
+
+			print HD q{
+</TBODY>
+</TABLE>
+			};
+
+		}
+	}
+
+	print HD q{
+</BODY>
+</HTML>
+	};
+
+	close HD;
 }
 
 
