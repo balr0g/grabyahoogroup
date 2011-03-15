@@ -50,9 +50,12 @@ sub new {
 
 	my $BEGIN_MSGID;
 	my $END_MSGID;
+	my $INCREASING;
 	my $MBOX = 1;
 
 	my $FORCE_GET;
+
+	my $MANUAL;
 
 	my $QUIET = 1;
 	my $VERBOSE = 0;
@@ -81,6 +84,8 @@ sub new {
 				 'photo-index!' => \$PHOTO_INDEX,
 				 'attach-index!' => \$ATTACH_INDEX,
 				 'member-index!' => \$MEMBER_INDEX,
+				 'manual-continue!' => \$MANUAL,
+				 'increasing!' => \$INCREASING,
 				 'help!' => \$HELP,
 				);
 
@@ -89,23 +94,26 @@ sub new {
 	if ($HELP) {
 		print qq{
 Usage:
-	$0 [--messages [[--nombox] [--begin] [--end]]] [--files] [--attachments [--noattach-index]] [--photos [--nophoto-index]] [--members [--nomember-index]] [--username] [--password] [--group] [--forceget] [--quiet] [--verbose] [--help]
+	$0 [--messages [[--nombox] [--increasing] [--begin] [--end]]] [--files] [--attachments [--noattach-index]] [--photos [--nophoto-index]] [--members [--nomember-index]] [--username] [--password] [--group] [--manual-continue] [--forceget] [--quiet] [--verbose] [--help]
 		messages: Retrieve all the email messages
 			begin: Oldest message to pick
 			end: Latest message to pick
-			mbox: Generate mbox format file for the messages - enabled by default pass --nombox to turn it off
+			increasing: Start from oldest to latest
+			nombox: Don't generate mbox format file for the messages
 		files: Retrieve everything from the files section
 		attachments: Retrieve everything from the attachments section
-			attach-index: Generate html index page to browse the downloaded attachments
+			noattach-index: Don't generate html index page to browse the downloaded attachments
 		photos: Retrieve everything from the photos section
-			photo-index: Generate html index page to browse the downloaded photos
+			nophoto-index: Don't generate html index page to browse the downloaded photos
 		members: Retrieve everything from the members section including members, moderators, bouncing, pending and banned list
-			member-index: Generate html index page to browse the member list
+			nomember-index: Don't generate html index page to browse the member list
 
 		username: Login username
 		password: Login password
 
 		group: Group to process
+
+		manual-continue: Don't sleep for an hour rather prompt user to hit continue if running under a terminal
 
 		forceget: Will download already downloaded content
 
@@ -140,7 +148,9 @@ MetaData:
 
 	my @terminals = GetTerminalSize(*STDOUT);
 
-	die 'Group name is mandatory' unless $GROUP or scalar @terminals;
+	my $IN_TERMINAL = scalar @terminals;
+
+	die 'Group name is mandatory' unless $GROUP or $IN_TERMINAL;
 
 	unless ($GROUP) {
 		print "Group to download : ";
@@ -157,7 +167,7 @@ MetaData:
 	} else {
 		$QUIET -= $VERBOSE;
 	}
-	$logger = new GrabYahoo::Logger('file' => qq{$GROUP/GrabYahooGroup.log}, 'quiet' => $QUIET);
+	$logger = new GrabYahoo::Logger('file' => qq{$GROUP/GrabYahooGroup.log}, 'quiet' => $QUIET, 'in_terminal' => $IN_TERMINAL);
 	$logger->group($GROUP);
 	$logger->section(' ');
 
@@ -167,7 +177,7 @@ MetaData:
 		closedir UD;
 	}
 
-	$logger->fatal('Username not provided and not running in terminal') unless $USERNAME or scalar @terminals;
+	$logger->fatal('Username not provided and not running in terminal') unless $USERNAME or $IN_TERMINAL;
 
 	unless ($USERNAME) {
 		print "Enter username : ";
@@ -181,7 +191,7 @@ MetaData:
 
 	my $self = {};
 
-	$client = new GrabYahoo::Client($USERNAME, $PASSWORD);
+	$client = new GrabYahoo::Client('user' => $USERNAME, 'password' => $PASSWORD, 'in_terminal' => $IN_TERMINAL, 'manual' => $MANUAL);
 
 	my $content = $client->response()->content();
 
@@ -204,7 +214,7 @@ MetaData:
 
 	if ($MESSAGES) {
 		$logger->info('MESSAGES enabled');
-		my $object = eval { new GrabYahoo::Messages (force => $FORCE_GET, begin => $BEGIN_MSGID, end => $END_MSGID, mbox => $MBOX); };
+		my $object = eval { new GrabYahoo::Messages (force => $FORCE_GET, begin => $BEGIN_MSGID, end => $END_MSGID, mbox => $MBOX, increasing => $INCREASING); };
 		if ($@) {
 			$logger->error( $@ );
 		} else {
@@ -271,11 +281,15 @@ use HTTP::Request::Common qw(GET POST);
 
 sub new {
 	my $package = shift;
-	my ($user, $pass) = @_;
+	my %args = @_;
+	my $user = $args{'user'};
+	my $password = $args{'password'};
+	my $in_terminal = $args{'in_terminal'};
+	my $manual = $args{'manual'};
 
 	my $self = bless {};
 
-	my @accessors = ('user', 'pass', 'ua', 'cookie_jar', 'response');
+	my @accessors = ('user', 'pass', 'ua', 'cookie_jar', 'response', 'in_terminal', 'manual');
 	no strict 'refs';
 	foreach my $accessor (@accessors) {
 		*$accessor = sub {
@@ -288,7 +302,9 @@ sub new {
 	use strict;
 
 	$self->user($user);
-	$self->pass($pass);
+	$self->pass($password);
+	$self->in_terminal($in_terminal);
+	$self->manual($manual);
 
 	my $ua = new LWP::UserAgent;
 	$ua->proxy('http', $HTTP_PROXY_URL) if $HTTP_PROXY_URL;	
@@ -336,8 +352,7 @@ sub fetch {
 			$logger->warn($url . ': Document Not Accessible - report to Yahoo');
 			$self->error_count();
 			$logger->info('Sleeping for 1 min');
-			$logger->info('Next check on ' . localtime(time() + 60));
-			sleep 60;
+			$self->pause(60);
 			$content = $client->fetch($url,$referrer,$is_image);
 		} elsif ($response->code() == 404 and $is_image) {
 			return '';
@@ -354,8 +369,7 @@ sub fetch {
 		$logger->error($message_block);
 		$self->error_count();
 		$logger->warn(qq/Sleeping for one hour/);
-		$logger->info('Next check on ' . localtime(time() + 60*60));
-		sleep(60*60);
+		$self->pause();
 		$content = $self->fetch($url,$referrer,$is_image);
 	}
 
@@ -363,8 +377,7 @@ sub fetch {
 		$logger->error('Yahoo quota block kicked in');
 		$self->error_count();
 		$logger->warn(qq/Sleeping for one hour/);
-		$logger->info('Next check on ' . localtime(time() + 60*60));
-		sleep(60*60);
+		$self->pause();
 		$content = $self->fetch($url,$referrer,$is_image);
 	}
 
@@ -397,12 +410,11 @@ sub fetch {
 			($redirect) = $content =~ m!location\.replace\((.+?)\)!;
 			$redirect =~ s/"//g;
 			$redirect =~ s/'//g;
-			$redirect = HTML::Entities::decode($redirect);
 		}
+		$redirect = HTML::Entities::decode($redirect);
 		if ($redirect =~ m!errors/framework_error!) {
 			$logger->warn('Yahoo framework error');
-			$logger->info('Sleeping for 5 seconds');
-			sleep 5;
+			$self->pause(5);
 			$logger->info('Attempting to retrieve original URL');
 			$redirect = $url;
 			$self->error_count();
@@ -436,6 +448,19 @@ sub error_count {
 sub reset_error_count {
 	my $self = shift;
 	$self->{'ERROR_COUNTER'} = 0;
+}
+
+
+sub pause {
+	my $self = shift;
+	my $duration = shift || 60*60;
+	if ($self->in_terminal() and $self->manual()) {
+		print "Hit [ENTER] when ready to continue: ";
+		my $response = <>;
+	} else {
+		$logger->info( 'Sleeping till - ' . scalar(localtime(time()+$duration)) );
+		sleep $duration;
+	}
 }
 
 
@@ -508,8 +533,7 @@ sub process_loginform {
 	}
 
 	unless ($self->pass()) {
-		my @terminals = GetTerminalSize(*STDOUT);
-		$logger->fatal('Password not provided and not running in terminal') unless scalar @terminals;
+		$logger->fatal('Password not provided and not running in terminal') unless $self->in_terminal();
 		unless ($self->pass()) {
 			use Term::ReadKey;
 			ReadMode('noecho');
@@ -542,13 +566,13 @@ sub process_loginform {
 
 package GrabYahoo::Logger;
 
-use Term::ReadKey;
-
 
 sub new {
 	my $package = shift;
 	my $self = bless {};
 	my %args = @_;
+
+	$self->{'IN_TERMINAL'} = $args{'in_terminal'};
 
 	my $logfile = $args{'file'};
 	my $quiet = $args{'quiet'};
@@ -565,8 +589,7 @@ sub new {
 	}
 	use strict;
 
-	my @terminals = GetTerminalSize(*STDOUT);
-	$self->{'HANDLES'} = [ *STDOUT ] if scalar @terminals;
+	$self->{'HANDLES'} = [ *STDOUT ] if $self->{'IN_TERMINAL'};
 
 	my $file_handle;
 	open ($file_handle, ">>", $logfile) or die qq/$logfile: $!\n/;
@@ -632,6 +655,7 @@ sub new {
 	$self->{'BEGIN_MSGID'} = $args{'begin'};
 	$self->{'END_MSGID'} = $args{'end'};
 	$self->{'MBOX'} = $args{'mbox'};
+	$self->{'INCREASING'} = $args{'increasing'};
 	return bless $self;
 }
 
@@ -645,11 +669,17 @@ sub process {
 	my $force = $self->{'FORCE_GET'};
 	my $begin_msg = $self->{'BEGIN_MSGID'} || 1;
 	my $end_msg = $self->{'END_MSGID'};
+	my $increasing = $self->{'INCREASING'};
 
-	mkdir qq{$GROUP/MESSAGES} or $logger->fatal(qq{$GROUP/MESSAGES: } . $!) unless -d qq{$GROUP/MESSAGES};
+	unless (-d qq{$GROUP/MESSAGES}) {
+		mkdir qq{$GROUP/MESSAGES} or $logger->fatal(qq{$GROUP/MESSAGES: } . $!);
+		$increasing = 1;
+	}
 	my $content = $client->fetch(qq{/group/$GROUP/messages/1?xm=1&m=s&l=1&o=1});
 	($end_msg) = $content =~ m!<table cellpadding="0" cellspacing="0" class="headview headnav"><tr>\s+<td class="viewright">\s+[^\s]+ <em>\d+ - \d+</em> [^\s]+ (\d+) !s unless $end_msg;
-	foreach my $msg_idx (reverse($begin_msg..$end_msg)) {
+	my @msg_list = reverse($begin_msg..$end_msg);
+	@msg_list = ($begin_msg..$end_msg) if $increasing;
+	foreach my $msg_idx (@msg_list) {
 		next if (!$force and -f qq!$GROUP/MESSAGES/$msg_idx!);
 		$self->save_message($msg_idx);
 	}
