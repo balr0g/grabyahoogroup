@@ -137,6 +137,7 @@ MetaData:
 	GROUP/USERNAME.cookie: Authentication cookies are stored here - deleting it will force a login (no this wont help if Yahoo is blocking for maxed out quota)
 	GROUP/GrabYahooGroup.log: Log file to capture all output - feel free to delete whenever you like (it can get pretty large fast)
 	GROUP/[CAPABILITIES]/layout.dump: Human readable metadata used for generating index pages - can be used for custom html pages or other interfaces
+	GROUP/MESSAGES/[n]: All files with numbers as names are the individual messages - purging them will cause all message to be re-downloaded in the next run
 		\n};
 
 		exit 0;
