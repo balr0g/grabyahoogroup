@@ -147,9 +147,9 @@ MetaData:
 	die "Invalid end message id\n" if ($END_MSGID and ($END_MSGID < 1));
 	die "Begining message id can't be greater than end message id\n" if ($BEGIN_MSGID and $END_MSGID and ($BEGIN_MSGID > $END_MSGID));
 
-	my @terminals = GetTerminalSize(*STDOUT);
+	eval { GetTerminalSize(*STDOUT) };
 
-	my $IN_TERMINAL = scalar @terminals;
+	my $IN_TERMINAL = 1 unless $@;
 
 	die 'Group name is mandatory' unless $GROUP or $IN_TERMINAL;
 
