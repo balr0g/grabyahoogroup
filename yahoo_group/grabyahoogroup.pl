@@ -196,7 +196,11 @@ MetaData:
 
 	my $content = $client->response()->content();
 
+	$logger->fatal('Group not found') if $content =~ m!<h3>Group Not Found</h3>!;
+
 	my ($capabilities) = $content =~ m!<div class="ygrp-contentblock">\s+<ul class="ygrp-ul menulist">\s+(.+?)\s+</ul>!s;
+
+	$logger->fatal(q/This shouldn't happen - capabilities section missing ?/) unless $capabilities;
 
 	# Ensure we use the group name Yahoo is familiar with
 	($GROUP) = $capabilities =~ m!<li class="active"> <a href="/group/(.+?)/!s;
