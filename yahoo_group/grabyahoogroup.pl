@@ -359,7 +359,7 @@ sub fetch {
 			$logger->info('Sleeping for 1 min');
 			$self->pause(60);
 			$content = $client->fetch($url,$referrer,$is_image);
-		} elsif ($response->code() == 404 and $is_image) {
+		} elsif ($response->code() == 404 || 403 and $is_image) {
 			return '';
 		} else {
 			$logger->fatal(qq/[$url] / . $response->as_string()) if $response->is_error();
