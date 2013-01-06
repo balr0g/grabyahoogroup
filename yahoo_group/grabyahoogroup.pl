@@ -681,7 +681,7 @@ sub process {
 		$increasing = 1;
 	}
 	my $content = $client->fetch(qq{/group/$GROUP/messages/1?xm=1&m=s&l=1&o=1});
-	($end_msg) = $content =~ m!<table cellpadding="0" cellspacing="0" class="headview headnav"><tr>\s+<td class="viewright">\s+[^\s]+ <em>\d+ - \d+</em> [^\s]+ (\d+) !s unless $end_msg;
+	($end_msg) = $content =~ m!<td class="viewright" .+?>\s+[^\s]+ <em>\d+ - \d+</em> [^\s]+ (\d+) !s unless $end_msg;
 	my @msg_list = reverse($begin_msg..$end_msg);
 	@msg_list = ($begin_msg..$end_msg) if $increasing;
 	foreach my $msg_idx (@msg_list) {
@@ -740,7 +740,7 @@ sub save_message {
 	my ($idx) = @_;
 
 	my $content = $client->fetch(qq{/group/$GROUP/message/$idx?source=1});
-	my ($message) = $content =~ m!<td class="source user">\s+(From .+?)</td>!s;
+	my ($message) = $content =~ m!<td class="source user" .+?>\s+(From .+?)</td>!s;
 	unless ($message) {
 		my ($message_block) = $content =~ m#<!-- start content include -->.+?<div class="ygrp-contentblock">(.+?)</div>#s;
 		$message_block =~ s/^\s+//;
