@@ -819,7 +819,7 @@ sub process_folder {
 			$self->process_folder($link);
 		} else {
 			my $fs_name = $description;
-			$fs_name = $self->msfile($description) if $self->{'MSFILES'};
+			$fs_name = $self->msfiles($description) if $self->{'MSFILES'};
 			if (!$force and -f qq{$GROUP/FILES/$folder$fs_name}) {
 				$logger->debug(qq{$folder$fs_name - exists [skipped]});
 				next;
