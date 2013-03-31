@@ -282,7 +282,7 @@ sub process {
 package GrabYahoo::Client;
 
 use HTTP::Request::Common qw(GET POST);
-
+use Time::HiRes qw(usleep);
 
 sub new {
 	my $package = shift;
@@ -339,6 +339,8 @@ sub fetch {
 	my $ua = $self->ua();
 	my $cookie_jar = $self->cookie_jar();
 
+        $self->random_sleep_wait();
+
 	$url = $self->get_absurl($url);
 	$referrer = $self->get_absurl($referrer) if $referrer;
 
@@ -354,7 +356,7 @@ sub fetch {
 
 	if ($response->is_error()) {
 		if ($response->code() > 499 and $response->code() < 600) {
-			$logger->warn($url . ': Document Not Accessible - report to Yahoo');
+			$logger->warn($url . ': Document Not Accessible - report to Yahoo - code ' . $response->code());
 			$self->error_count();
 			$logger->info('Sleeping for 1 min');
 			$self->pause(60);
@@ -468,6 +470,13 @@ sub pause {
 	}
 }
 
+sub random_sleep_wait {
+        my $self = shift;
+	my $range = 2500;
+	my $minimum = 500;
+	my $random = int(rand($range)) + $minimum;
+	usleep($random * 1000);
+}
 
 sub process_adultconf {
 	my $self = shift;
@@ -819,7 +828,7 @@ sub process_folder {
 			$self->process_folder($link);
 		} else {
 			my $fs_name = $description;
-			$fs_name = $self->msfiles($description) if $self->{'MSFILES'};
+			$fs_name = $self->msfile($description) if $self->{'MSFILES'};
 			if (!$force and -f qq{$GROUP/FILES/$folder$fs_name}) {
 				$logger->debug(qq{$folder$fs_name - exists [skipped]});
 				next;
