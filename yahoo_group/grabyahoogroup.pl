@@ -747,6 +747,7 @@ sub save_message {
 	my $self = shift;
 
 	my ($idx) = @_;
+        SAVE_MESSAGE_START:
 
 	my $content = $client->fetch(qq{/group/$GROUP/message/$idx?source=1});
 	my ($message) = $content =~ m!<td class="source user" .+?>\s+(From .+?)</td>!s;
@@ -755,6 +756,9 @@ sub save_message {
 		$message_block =~ s/^\s+//;
 		$message_block =~ s/\s+$//;
 		$logger->warn($idx . ': ' . $message_block);
+                if (index($message_block, 'Invalid') != -1) {
+                    goto SAVE_MESSAGE_START;
+                }
 		return;
 	}
 	#Strip all Yahoo tags
