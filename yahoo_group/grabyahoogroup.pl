@@ -1,7 +1,5 @@
 #!/usr/bin/perl -w
 
-# $Header: /home/mithun/MIGRATION/grabyahoogroup-cvsbackup/yahoo_group/download.pl,v 1.15 2011-02-14 00:26:06 mithun Exp $
-
 delete @ENV{ qw(IFS CDPATH ENV BASH_ENV PATH) };
 
 use 5.8.1;
@@ -66,6 +64,8 @@ sub new {
 
 	my $HELP = 0;
 
+	my $HUMAN = 0;
+
 
 	my $result = GetOptions ('messages!' => \$MESSAGES,
 				 'files!' => \$FILES,
@@ -86,6 +86,7 @@ sub new {
 				 'member-index!' => \$MEMBER_INDEX,
 				 'manual-continue!' => \$MANUAL,
 				 'increasing!' => \$INCREASING,
+				 'human!' => \$HUMAN,
 				 'help!' => \$HELP,
 				);
 
@@ -192,7 +193,7 @@ MetaData:
 
 	my $self = {};
 
-	$client = new GrabYahoo::Client('user' => $USERNAME, 'password' => $PASSWORD, 'in_terminal' => $IN_TERMINAL, 'manual' => $MANUAL);
+	$client = new GrabYahoo::Client('user' => $USERNAME, 'password' => $PASSWORD, 'in_terminal' => $IN_TERMINAL, 'manual' => $MANUAL, 'human' => $HUMAN);
 
 	my $content = $client->response()->content();
 
@@ -282,7 +283,7 @@ sub process {
 package GrabYahoo::Client;
 
 use HTTP::Request::Common qw(GET POST);
-use Time::HiRes qw(usleep);
+
 
 sub new {
 	my $package = shift;
@@ -291,10 +292,11 @@ sub new {
 	my $password = $args{'password'};
 	my $in_terminal = $args{'in_terminal'};
 	my $manual = $args{'manual'};
+	my $human = $args{'human'};
 
 	my $self = bless {};
 
-	my @accessors = ('user', 'pass', 'ua', 'cookie_jar', 'response', 'in_terminal', 'manual');
+	my @accessors = ('user', 'pass', 'ua', 'cookie_jar', 'response', 'in_terminal', 'manual', 'human');
 	no strict 'refs';
 	foreach my $accessor (@accessors) {
 		*$accessor = sub {
@@ -310,6 +312,7 @@ sub new {
 	$self->pass($password);
 	$self->in_terminal($in_terminal);
 	$self->manual($manual);
+	$self->human($human);
 
 	my $ua = new LWP::UserAgent;
 	$ua->proxy('http', $HTTP_PROXY_URL) if $HTTP_PROXY_URL;	
@@ -339,8 +342,6 @@ sub fetch {
 	my $ua = $self->ua();
 	my $cookie_jar = $self->cookie_jar();
 
-        $self->random_sleep_wait();
-
 	$url = $self->get_absurl($url);
 	$referrer = $self->get_absurl($referrer) if $referrer;
 
@@ -354,9 +355,13 @@ sub fetch {
 
 	my $content = $response->content();
 
+	if ($self->human()) {
+		sleep ( 1 + int(rand(3)) ); # 1 sec reflex time and 3 seconds browse/render time
+	}
+
 	if ($response->is_error()) {
 		if ($response->code() > 499 and $response->code() < 600) {
-			$logger->warn($url . ': Document Not Accessible - report to Yahoo - code ' . $response->code());
+			$logger->warn($url . ': Document Not Accessible - report to Yahoo');
 			$self->error_count();
 			$logger->info('Sleeping for 1 min');
 			$self->pause(60);
@@ -470,13 +475,6 @@ sub pause {
 	}
 }
 
-sub random_sleep_wait {
-        my $self = shift;
-	my $range = 2500;
-	my $minimum = 500;
-	my $random = int(rand($range)) + $minimum;
-	usleep($random * 1000);
-}
 
 sub process_adultconf {
 	my $self = shift;
@@ -532,7 +530,7 @@ sub process_loginform {
 
 	my $content = $response->content();
 
-	my ($form) = $content =~ m!(<form .+?login_form.+?>.+?</form>)!s;
+	my ($form) = $content =~ m!(<fieldset.+?id='fsLogin'.+?>(.+?)</fieldset>)!s;
 
 	my ($post) = $form =~ m!<form.+?action=(.+?) !;
 	$post =~ s/"//g;
@@ -747,8 +745,8 @@ sub save_message {
 	my $self = shift;
 
 	my ($idx) = @_;
-        SAVE_MESSAGE_START:
-
+	SAVE_MESSAGE_START:
+	
 	my $content = $client->fetch(qq{/group/$GROUP/message/$idx?source=1});
 	my ($message) = $content =~ m!<td class="source user" .+?>\s+(From .+?)</td>!s;
 	unless ($message) {
@@ -756,9 +754,9 @@ sub save_message {
 		$message_block =~ s/^\s+//;
 		$message_block =~ s/\s+$//;
 		$logger->warn($idx . ': ' . $message_block);
-                if (index($message_block, 'Invalid') != -1) {
-                    goto SAVE_MESSAGE_START;
-                }
+		if (index($message_block, 'Invalid') != -1) {
+			goto SAVE_MESSAGE_START;
+		}
 		return;
 	}
 	#Strip all Yahoo tags
