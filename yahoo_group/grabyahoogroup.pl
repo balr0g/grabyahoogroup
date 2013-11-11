@@ -316,7 +316,7 @@ sub new {
 
 	my $ua = new LWP::UserAgent;
 	$ua->proxy('http', $HTTP_PROXY_URL) if $HTTP_PROXY_URL;	
-	$ua->agent('GrabYahoo/2.00');
+	$ua->agent('Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:25.0) Gecko/20100101 Firefox/25.0');
 	$ua->ssl_opts('verify_hostname', 0);
 	my $cookie_file = "$GROUP/$user.cookie";
 	my $cookie_jar = HTTP::Cookies->new( 'file' => $cookie_file );
