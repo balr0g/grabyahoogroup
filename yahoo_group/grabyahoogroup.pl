@@ -708,7 +708,7 @@ sub process {
 sub mboxify {
 	my $self = shift;
 
-	open(MD, '>', qq{$GROUP/MESSAGES/$GROUP.mbox}) or $logger->fatal(qq{$GROUP/MESSAGES/$GROUP.mbox: } . $!);
+	open(MD, '>:encoding(UTF-8)', qq{$GROUP/MESSAGES/$GROUP.mbox}) or $logger->fatal(qq{$GROUP/MESSAGES/$GROUP.mbox: } . $!);
 
 	my @sources;
 
@@ -726,7 +726,7 @@ sub mboxify {
 
 	foreach my $file (sort {$a <=> $b} @sources) {
 		$logger->debug('Sourcing: ' . $file);
-		open(SD, '<', qq{$GROUP/MESSAGES/$file}) or $logger->fatal(qq{$GROUP/MESSAGES/$file: } . $!);
+		open(SD, '<:encoding(UTF-8)', qq{$GROUP/MESSAGES/$file}) or $logger->fatal(qq{$GROUP/MESSAGES/$file: } . $!);
 		my $from_line = <SD>;
 		$from_line =~ s/From [^\s]+/From -/;
 		print MD $from_line;
@@ -774,7 +774,7 @@ sub save_message {
 	$subject =~ s!\n!!sg;
 	$subject = Encode::decode('MIME-Header', $subject);
 	$logger->info($idx . ':' . $subject);
-	open(MH, '>', qq!$GROUP/MESSAGES/$idx!) or $logger->fatal(qq{$GROUP/MESSAGES/$idx: } . $!);
+	open(MH, '>:encoding(UTF-8)', qq!$GROUP/MESSAGES/$idx!) or $logger->fatal(qq{$GROUP/MESSAGES/$idx: } . $!);
 	print MH $header;
 	print MH "\n\n";
 	print MH $body;
@@ -870,7 +870,7 @@ sub new {
 	if (-f qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump}) {
 		my $buf = $/;
 		$/ = undef;
-		open(LAY, '<', qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump}) or $logger->fatal(qq{$GROUP/PHOTOS/layout.dump: } . $!);
+		open(LAY, '<:encoding(UTF-8)', qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump}) or $logger->fatal(qq{$GROUP/PHOTOS/layout.dump: } . $!);
 		my $dump = <LAY>;
 		close LAY;
 		$/ = $buf;
@@ -890,7 +890,7 @@ sub save_layout {
 	return unless $LAYOUT;
 
 	my $layout = Data::Dumper->Dump([$LAYOUT]);
-	open (LAY, '>', qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump}) or $logger->fatal(qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump: } . $!);
+	open (LAY, '>:encoding(UTF-8)', qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump}) or $logger->fatal(qq{$GROUP/MESSAGES/ATTACHMENTS/layout.dump: } . $!);
 	print LAY $layout;
 	close LAY;
 }
@@ -925,7 +925,7 @@ sub generate_index {
 
 	my $layout = $self->{'LAYOUT'};
 
-	open (HD, '>', $GROUP . '/MESSAGES/ATTACHMENTS/index.html') or $logger->fatal($GROUP . '/MESSAGES/ATTACHMENTS/index.html: ' . $!);
+	open (HD, '>:encoding(UTF-8)', $GROUP . '/MESSAGES/ATTACHMENTS/index.html') or $logger->fatal($GROUP . '/MESSAGES/ATTACHMENTS/index.html: ' . $!);
 	print HD q{
 <HTML>
 <BODY BACKGROUND='WHITE'>
@@ -1216,7 +1216,7 @@ sub save_layout {
 	return unless $LAYOUT;
 
 	my $layout = Data::Dumper->Dump([$LAYOUT]);
-	open (LAY, '>', qq{$GROUP/MEMBERS/layout.dump}) or $logger->fatal(qq{$GROUP/MEMBERS/layout.dump: } . $!);
+	open (LAY, '>:encoding(UTF-8)', qq{$GROUP/MEMBERS/layout.dump}) or $logger->fatal(qq{$GROUP/MEMBERS/layout.dump: } . $!);
 	print LAY $layout;
 	close LAY;
 }
@@ -1286,7 +1286,7 @@ sub generate_index {
 
 	my $layout = $self->{'LAYOUT'};
 
-	open (HD, '>', $GROUP . '/MEMBERS/index.html') or $logger->fatal($GROUP . '/MEMBERS/index.html: ' . $!);
+	open (HD, '>:encoding(UTF-8)', $GROUP . '/MEMBERS/index.html') or $logger->fatal($GROUP . '/MEMBERS/index.html: ' . $!);
 	print HD q{
 <HTML>
 <HEAD>
@@ -1448,7 +1448,7 @@ sub new {
 	if (-f qq{$GROUP/PHOTOS/layout.dump}) {
 		my $buf = $/;
 		$/ = undef;
-		open(LAY, '<', qq{$GROUP/PHOTOS/layout.dump}) or $logger->fatal(qq{$GROUP/PHOTOS/layout.dump: } . $!);
+		open(LAY, '<:encoding(UTF-8)', qq{$GROUP/PHOTOS/layout.dump}) or $logger->fatal(qq{$GROUP/PHOTOS/layout.dump: } . $!);
 		my $dump = <LAY>;
 		close LAY;
 		$/ = $buf;
@@ -1468,7 +1468,7 @@ sub save_layout {
 	return unless $LAYOUT;
 
 	my $layout = Data::Dumper->Dump([$LAYOUT]);
-	open (LAY, '>', qq{$GROUP/PHOTOS/layout.dump}) or $logger->fatal(qq{$GROUP/PHOTOS/layout.dump: } . $!);
+	open (LAY, '>:encoding(UTF-8)', qq{$GROUP/PHOTOS/layout.dump}) or $logger->fatal(qq{$GROUP/PHOTOS/layout.dump: } . $!);
 	print LAY $layout;
 	close LAY;
 }
@@ -1502,7 +1502,7 @@ sub generate_index {
 
 	my $layout = $self->{'LAYOUT'};
 
-	open (HD, '>', $GROUP . '/PHOTOS/index.html') or $logger->fatal($GROUP . '/PHOTOS/index.html: ' . $!);
+	open (HD, '>:encoding(UTF-8)', $GROUP . '/PHOTOS/index.html') or $logger->fatal($GROUP . '/PHOTOS/index.html: ' . $!);
 	print HD q{
 <HTML>
 <BODY BACKGROUND='WHITE'>
