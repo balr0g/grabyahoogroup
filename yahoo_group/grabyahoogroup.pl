@@ -317,6 +317,7 @@ sub new {
 	my $ua = new LWP::UserAgent;
 	$ua->proxy('http', $HTTP_PROXY_URL) if $HTTP_PROXY_URL;	
 	$ua->agent('GrabYahoo/2.00');
+	$ua->ssl_opts('verify_hostname', 0);
 	my $cookie_file = "$GROUP/$user.cookie";
 	my $cookie_jar = HTTP::Cookies->new( 'file' => $cookie_file );
 	$cookie_jar->load();
@@ -530,7 +531,7 @@ sub process_loginform {
 
 	my $content = $response->content();
 
-	my ($form) = $content =~ m!(<fieldset.+?id='fsLogin'.+?>(.+?)</fieldset>)!s;
+	my ($form) = $content =~ m!(<fieldset.+?id=('|")fsLogin('|").+?>(.+?)</fieldset>)!s;
 
 	my ($post) = $form =~ m!<form.+?action=(.+?) !;
 	$post =~ s/"//g;
