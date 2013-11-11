@@ -64,7 +64,7 @@ sub new {
 
 	my $HELP = 0;
 
-	my $HUMAN = 0;
+	my $NOHUMAN = 0;
 
 
 	my $result = GetOptions ('messages!' => \$MESSAGES,
@@ -86,7 +86,7 @@ sub new {
 				 'member-index!' => \$MEMBER_INDEX,
 				 'manual-continue!' => \$MANUAL,
 				 'increasing!' => \$INCREASING,
-				 'human!' => \$HUMAN,
+				 'nohuman!' => \$NOHUMAN,
 				 'help!' => \$HELP,
 				);
 
@@ -95,7 +95,7 @@ sub new {
 	if ($HELP) {
 		print qq{
 Usage:
-	$0 [--messages [[--nombox] [--increasing] [--begin] [--end]]] [--files] [--attachments [--noattach-index]] [--photos [--nophoto-index]] [--members [--nomember-index]] [--username] [--password] [--group] [--manual-continue] [--forceget] [--quiet] [--verbose] [--help]
+	$0 [--messages [[--nombox] [--increasing] [--begin] [--end]]] [--files] [--attachments [--noattach-index]] [--photos [--nophoto-index]] [--members [--nomember-index]] [--username] [--password] [--group] [--manual-continue] [--forceget] [--nohuman] [--quiet] [--verbose] [--help]
 		messages: Retrieve all the email messages
 			begin: Oldest message to pick
 			end: Latest message to pick
@@ -117,6 +117,8 @@ Usage:
 		manual-continue: Don't sleep for an hour rather prompt user to hit continue if running under a terminal
 
 		forceget: Will download already downloaded content
+
+		nohuman: Disables the 1 sec reflex time and 3 seconds default browse/render time delay to avoid Error 999
 
 		quiet: Decrease logging one level
 		verbose: Increase logging one level
@@ -193,7 +195,7 @@ MetaData:
 
 	my $self = {};
 
-	$client = new GrabYahoo::Client('user' => $USERNAME, 'password' => $PASSWORD, 'in_terminal' => $IN_TERMINAL, 'manual' => $MANUAL, 'human' => $HUMAN);
+	$client = new GrabYahoo::Client('user' => $USERNAME, 'password' => $PASSWORD, 'in_terminal' => $IN_TERMINAL, 'manual' => $MANUAL, 'nohuman' => $NOHUMAN);
 
 	my $content = $client->response()->content();
 
@@ -292,11 +294,11 @@ sub new {
 	my $password = $args{'password'};
 	my $in_terminal = $args{'in_terminal'};
 	my $manual = $args{'manual'};
-	my $human = $args{'human'};
+	my $nohuman = $args{'nohuman'};
 
 	my $self = bless {};
 
-	my @accessors = ('user', 'pass', 'ua', 'cookie_jar', 'response', 'in_terminal', 'manual', 'human');
+	my @accessors = ('user', 'pass', 'ua', 'cookie_jar', 'response', 'in_terminal', 'manual', 'nohuman');
 	no strict 'refs';
 	foreach my $accessor (@accessors) {
 		*$accessor = sub {
@@ -312,7 +314,7 @@ sub new {
 	$self->pass($password);
 	$self->in_terminal($in_terminal);
 	$self->manual($manual);
-	$self->human($human);
+	$self->nohuman($nohuman);
 
 	my $ua = new LWP::UserAgent;
 	$ua->proxy('http', $HTTP_PROXY_URL) if $HTTP_PROXY_URL;	
@@ -356,7 +358,7 @@ sub fetch {
 
 	my $content = $response->content();
 
-	if ($self->human()) {
+	if (!($self->nohuman())) {
 		sleep ( 1 + int(rand(3)) ); # 1 sec reflex time and 3 seconds browse/render time
 	}
 
